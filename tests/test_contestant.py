@@ -144,6 +144,43 @@ class TestAgent(unittest.TestCase):
         self.assertEqual(action["action"], "move")
         self.assertEqual(action["direction"], "up")
 
+    def test_explored_grows_with_vision_window(self):
+        agent = self.make_agent()
+        agent.on_perception(perception(tick=0, pos=(8, 8)))
+        self.assertEqual(len(agent.explored), 81)          # 9×9 视野窗口
+        agent.on_perception(perception(tick=1, pos=(8, 8)))
+        self.assertGreaterEqual(len(agent.explored), 81)
+
+    def test_blocked_is_learned_from_last_action(self):
+        """真机实测踩到的坑：撞墙回执没有回灌给策略，于是反复撞同一堵墙。"""
+        agent = self.make_agent()
+        first = agent.on_perception(perception(tick=0, pos=(1, 1), resources=(((4, 0), 10),)))
+        self.assertEqual(first["action"], "move")
+        direction = first["direction"]
+        dx, dy = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}[direction]
+        blocked_cell = (1 + dx, 1 + dy)
+        # 下一帧：位置没动，回执说 E_BLOCKED
+        stuck = perception(tick=1, pos=(1, 1), resources=(((4, 0), 10),))
+        stuck["self"]["last_action"] = {"tick": 0, "action": "move", "moved": False,
+                                        "error": "E_BLOCKED"}
+        agent.on_perception(stuck)
+        self.assertIn(blocked_cell, agent.known_obstacles)
+        self.assertIn(blocked_cell, agent.strategy.blocked)
+
+    def test_exploration_does_not_stall_at_start(self):
+        """没有资源可见时必须往外探索，不能原地 wait。"""
+        agent = self.make_agent()
+        seen_positions = {(1, 1)}
+        pos = (1, 1)
+        for tick in range(12):
+            action = agent.on_perception(perception(tick=tick, pos=pos))
+            if action["action"] == "move":
+                dx, dy = {"up": (0, -1), "down": (0, 1), "left": (-1, 0),
+                          "right": (1, 0)}[action["direction"]]
+                pos = (pos[0] + dx, pos[1] + dy)
+                seen_positions.add(pos)
+        self.assertGreaterEqual(len(seen_positions), 6)
+
     def test_ignores_enemy_not_in_line(self):
         agent = self.make_agent(stage=2)
         action = agent.on_perception(perception(tick=3, robots=((1, 1),)))

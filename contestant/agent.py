@@ -63,6 +63,9 @@ class Agent:
         self.height = 0
         self.missions = []
         self.reach_done = False
+        self.explored = set()          # 已经"看过"的格子（视野窗口覆盖过的）
+        self.known_obstacles = set()   # 见过的障碍（静态，可以永久记住）
+        self.last_move = None          # (出发点, 方向)：用来解释下一帧的 E_BLOCKED
         self.stats = {"perceptions": 0, "actions": 0, "skipped": 0}
 
     # ---------- 日志 ----------
@@ -96,6 +99,7 @@ class Agent:
         self.stats["perceptions"] += 1
 
         me = data.get("self") if isinstance(data.get("self"), dict) else {}
+        self._learn_from_last_action(me.get("last_action"))
         position = me.get("position")
         if isinstance(position, (list, tuple)) and len(position) == 2:
             try:
@@ -114,6 +118,13 @@ class Agent:
         if isinstance(missions, list):
             self.missions = [m for m in missions if isinstance(m, dict)]
 
+        self._mark_explored()
+        for entity in data.get("visible_entities") or []:
+            if isinstance(entity, dict) and entity.get("type") == "obstacle":
+                relative = decode_relative(entity.get("position"))
+                if relative is not None and self.pos is not None:
+                    self.known_obstacles.add((self.pos[0] + relative[0], self.pos[1] + relative[1]))
+
         action = self._decide(data, me)
         if action is None:
             action = {"action": "wait"}
@@ -128,6 +139,9 @@ class Agent:
         self.pos = None
         self.reach_done = False
         self.strategy = None
+        self.explored = set()
+        self.known_obstacles = set()
+        self.last_move = None
         if self.client is not None:
             from rmtc_client import EventUnderstanding
             self.understanding = EventUnderstanding(self.client, logger=self._logger)
@@ -174,21 +188,57 @@ class Agent:
                 self.reach_done = True
             elif not self.reach_done and self.last_tick >= self.cfg.reach_after_tick:
                 direction = step_toward(self.pos, reach_target,
-                                        self.strategy.blocked, self.width, self.height)
+                                        self.strategy.blocked | self.known_obstacles,
+                                        self.width, self.height)
                 if direction:
-                    return {"action": "move", "direction": direction}
+                    return self._move(direction)
 
         from contestant.sim import View
         resources = self._resources(data)
-        view = View(self.pos, resources, set(), set(), set(), set(), self.last_tick,
-                    self.cfg.vision_radius)
+        view = View(self.pos, resources, self.known_obstacles, self.explored, set(),
+                    set(), self.last_tick, self.cfg.vision_radius)
         self.strategy.observe(view)
         action = self.strategy.decide(view)
         if action.get("action") not in ATTACK_ACTIONS:
             return {"action": "wait"}
-        if action.get("action") == "move" and action.get("direction") not in DIRECTIONS:
-            return {"action": "wait"}
+        if action.get("action") == "move":
+            if action.get("direction") not in DIRECTIONS:
+                return {"action": "wait"}
+            return self._move(action["direction"])
         return action
+
+    # ---------- 记忆维护 ----------
+    def _move(self, direction):
+        """记下"这一步从哪走、往哪走"，下一帧用它解释 E_BLOCKED。"""
+        self.last_move = (self.pos, direction)
+        return {"action": "move", "direction": direction}
+
+    def _learn_from_last_action(self, last_action):
+        """上一 Tick 撞墙/越界 → 把那格记成障碍（协议允许记住自己的失败）。"""
+        attempt = self.last_move
+        self.last_move = None
+        if not isinstance(last_action, dict) or attempt is None:
+            return
+        if last_action.get("moved") is not False:
+            return
+        if last_action.get("error") not in ("E_BLOCKED", "E_OOB"):
+            return
+        origin, direction = attempt
+        dx, dy = DIRECTIONS.get(direction, (0, 0))
+        blocked = (origin[0] + dx, origin[1] + dy)
+        self.known_obstacles.add(blocked)
+        if self.strategy is not None:
+            self.strategy.blocked.add(blocked)
+            self.strategy.seen_resources.pop(blocked, None)
+
+    def _mark_explored(self):
+        """视野窗口覆盖过的格子就是"看过"了；不然探索会退化成原地附近乱走。"""
+        if self.pos is None or not self.width or not self.height:
+            return
+        radius = self.cfg.vision_radius
+        for x in range(max(0, self.pos[0] - radius), min(self.width, self.pos[0] + radius + 1)):
+            for y in range(max(0, self.pos[1] - radius), min(self.height, self.pos[1] + radius + 1)):
+                self.explored.add((x, y))
 
     # ---------- 感知解析 ----------
     def _resources(self, data):
