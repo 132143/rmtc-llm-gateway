@@ -34,9 +34,10 @@ def load_practice_map():
 
 VARIANTS = {
     "snake（原骨架）": lambda w, h: SnakeStrategy(w, h),
-    "greedy_bfs 价值×1": lambda w, h: GreedyBfsStrategy(w, h, value_weight=1.0),
-    "greedy_bfs 价值×2": lambda w, h: GreedyBfsStrategy(w, h, value_weight=2.0),
-    "greedy_bfs 价值×4": lambda w, h: GreedyBfsStrategy(w, h, value_weight=4.0),
+    "bfs detour=0（抢最近）": lambda w, h: GreedyBfsStrategy(w, h, detour=0.0),
+    "bfs detour=2": lambda w, h: GreedyBfsStrategy(w, h, detour=2.0),
+    "bfs detour=6": lambda w, h: GreedyBfsStrategy(w, h, detour=6.0),
+    "bfs detour=20（抢高价值）": lambda w, h: GreedyBfsStrategy(w, h, detour=20.0),
 }
 
 

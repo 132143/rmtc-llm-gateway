@@ -97,13 +97,19 @@ class SnakeStrategy(BaseStrategy):
 
 
 class GreedyBfsStrategy(BaseStrategy):
-    """有记忆的贪心 + BFS 绕障：优先"价值 / 距离"最高的资源，看不见就去记忆里的。"""
+    """有记忆的贪心 + BFS 绕障。
+
+    排序用 priority = value / (dist + detour)：
+      detour 小 → 谁近去谁（省 Tick）；
+      detour 大 → 谁值钱去谁（远的高价值也认）。
+    注意别写成 value × 常数 / dist —— 乘常数不改变顺序，测出来会"毫无区别"（踩过）。
+    """
 
     name = "greedy_bfs"
 
-    def __init__(self, width, height, value_weight=1.0):
+    def __init__(self, width, height, detour=0.0):
         super().__init__(width, height)
-        self.value_weight = value_weight
+        self.detour = detour
 
     def decide(self, view):
         targets = dict(self.seen_resources)
@@ -113,7 +119,7 @@ class GreedyBfsStrategy(BaseStrategy):
             def rank(item):
                 pos, value = item
                 dist = abs(pos[0] - view.pos[0]) + abs(pos[1] - view.pos[1])
-                return (-(value * self.value_weight) / max(1, dist), dist)
+                return (-value / (dist + self.detour), dist)
             target, _value = sorted(targets.items(), key=rank)[0]
             direction = step_toward(view.pos, target, self.blocked | view.obstacles, self.width, self.height)
             if direction:
@@ -141,8 +147,8 @@ class MissionFirstStrategy(GreedyBfsStrategy):
 
     name = "mission_first"
 
-    def __init__(self, width, height, value_weight=1.5, mission_targets=()):
-        super().__init__(width, height, value_weight)
+    def __init__(self, width, height, detour=2.0, mission_targets=()):
+        super().__init__(width, height, detour)
         self.mission_targets = list(mission_targets)
         self.done_missions = set()
 

@@ -6,7 +6,8 @@
 | 目录 | 是什么 | 谁在用它 |
 |---|---|---|
 | `rmtc_gateway/` | **网关服务端**：OpenAI 兼容的 `/v1/chat/completions`，只做转发与限额 | 组织方（比赛现场）那一侧的实现，本地也能起一份自己练 |
-| `rmtc_client/` | **参赛程序侧客户端**：异步、超时、降级、事件理解 | 我们的机器人在比赛中**真正要用的**那一半 |
+| `rmtc_client/` | **网关客户端**：异步、超时、降级、事件理解 | 我们的机器人在比赛中**真正要用的**那一半 |
+| `contestant/` | **参赛程序**：策略（BFS 贪心）+ Agent（感知→动作）+ ROS 节点 + 第一阶段模拟器 | 上场跑的就是这块 |
 
 一句话：**比赛只允许走主办方的统一网关调 AI**（协议 §5、规则 P5）。
 客户端这一半必须自己写对（不然动作窗被等模型堵死、或者额度一用完就崩），
@@ -44,32 +45,63 @@ curl -s http://127.0.0.1:8000/v1/chat/completions \
 python3 examples/llm_demo.py
 ```
 
-跑测试（45 个，只用标准库，本机实测约 25 秒——时间主要花在超时/退避那几个用例上）：
+跑测试（60 个，只用标准库，本机实测约 25 秒——时间主要花在超时/退避那几个用例上）：
 
 ```bash
-python3 run_tests.py -v      # → Ran 45 tests in 24.369s / OK
+python3 run_tests.py -v      # → Ran 60 tests in 24.940s / OK
 ```
 
 ## 1. 目录结构
 
+三块代码互不依赖，可以分开看、分开测：
+
 ```text
 rmtc-llm-gateway/
-├── rmtc_gateway/              网关服务端（协议 §5）
+│
+├── ① 网关服务端（协议 §5）────────────────────────────
+│   rmtc_gateway/
 │   ├── config.py              全部参数 + 环境变量（RMTC_GW_*）
 │   ├── errors.py              错误码表：状态码 / type / code 三元组
 │   ├── limits.py              额度、在途并发、来源 IP 频率
 │   ├── upstream.py            上游：本地模拟 / 真实 HTTP 转发（不重试）
 │   ├── server.py              两个端点 + 请求校验顺序 + 审计日志
 │   └── __main__.py            python3 -m rmtc_gateway --port 8000
-├── rmtc_client/               参赛程序侧
+│
+├── ② 网关客户端（机器人里用）──────────────────────────
+│   rmtc_client/
 │   ├── llm_client.py          LlmGatewayClient：1.5 s 超时、冷却、预算、按错误码降级
 │   ├── event_understanding.py 公告 → 提示（校验场次与时效）
 │   └── json_extract.py        从模型输出里抠第一个 JSON（字符串感知）
-├── examples/llm_demo.py       不用 ROS 的演示
-├── tests/                     45 个测试，覆盖每个错误码
-├── docs/PROTOCOL_MAP.md       协议条款 → 代码 → 测试 的对照表
-├── run_tests.py               一条命令跑完测试
-└── start_gateway.sh           虚拟机里启动网关
+│
+├── ③ 参赛程序（上场跑的）──────────────────────────────
+│   contestant/
+│   ├── agent.py               感知 → 动作：tick/session 去重、阵亡只能 wait、攻击判定
+│   ├── strategy.py            策略：snake（原骨架）/ GreedyBfs（记忆+BFS 绕障）
+│   ├── bot_node.py            ROS 2 节点（唯一依赖 rclpy 的一层）
+│   ├── sim.py                 第一阶段离线模拟器（按官方 stage1.json 参数）
+│   └── run_experiments.py     策略对比实验：官方图 + N 张随机图
+│
+├── 测试（按上面三块分文件）─────────────────────────────
+│   tests/test_gateway.py      ①  26 个：每个错误码、配额、并发、审计
+│   tests/test_client.py       ②  19 个：超时/降级/退避/公告理解/JSON 抽取
+│   tests/test_contestant.py   ③  15 个：模拟器、策略、Agent、9×9 解析
+│   run_tests.py               一条命令跑完 60 个测试
+│
+├── 文档与脚本
+│   docs/PROTOCOL_MAP.md       协议条款 → 代码 → 测试 的对照表
+│   docs/STRATEGY_NOTES.md     策略实验记录（每次测了什么、结论）
+│   docs/practice_stage1.json  官方练习包的 stage1 地图配置（原样拷入）
+│   examples/llm_demo.py       不用 ROS 的网关演示
+│   start_gateway.sh           虚拟机里启动网关
+└── README.md
+```
+
+只跑某一块的测试：
+
+```bash
+python3 -m unittest tests.test_gateway -v      # 只测网关
+python3 -m unittest tests.test_client -v       # 只测客户端
+python3 -m unittest tests.test_contestant -v   # 只测参赛代码
 ```
 
 ## 2. 参赛程序怎么接（这一节是比赛当天要看的）
@@ -165,7 +197,70 @@ hint = understanding.hint(session_id, tick)     # 拿不到就是 None，本地�
 3. **不打印正式令牌。** 只有全部令牌都以 `practice-` 开头时才打印到控制台。
 4. **审计日志里没有令牌原文**，只有席位、状态码、错误码、大小、耗时。
 
-## 6. 常见问题
+## 6. 参赛代码（`contestant/`）：策略怎么选、怎么测
+
+### 6.1 到底改了策略的哪里
+
+原骨架（桌面上的 `rmtc_bot.py`）：**看得见就朝最近资源走，看不见就蛇形扫图**，没有记忆、不认障碍。
+
+现在的 `GreedyBfsStrategy`：
+
+1. **记忆**：凡是在视野里出现过的资源都记下来，看不见了也知道该往哪走（协议允许记住此前合法看到的位置）；
+2. **BFS 绕障**：算路时避开障碍和"撞过的格子"，而不是撞墙浪费 Tick；
+3. **排序** `priority = 价值 / (距离 + detour)`：detour 小 → 谁近去谁；detour 大 → 谁值钱去谁。
+
+### 6.2 实测（本机，模拟器，官方 stage1 地图参数）
+
+官方练习地图：
+
+| 策略 | 得分 | 采集 |
+|---|---|---|
+| snake（原骨架） | 28.0 / 40 | 140 / 200 |
+| bfs detour=0 / 2 / 6 | **40.0 / 40** | 200 / 200 |
+| bfs detour=20（抢高价值） | 38.0 / 40 | 190 / 200 |
+
+100 张等密度随机地图：
+
+| 策略 | 平均 | 最低 | 满分场次 |
+|---|---|---|---|
+| snake（原骨架） | 19.92 / 40 | 0.0 | 3 / 100 |
+| **bfs detour=0（抢最近）** | **33.56 / 40** | 10.0 | **26 / 100** |
+| bfs detour=6 | 33.52 / 40 | 10.0 | 20 / 100 |
+| bfs detour=20（抢高价值） | 33.52 / 40 | 10.0 | 19 / 100 |
+
+**结论：先抢最近的比先抢值钱的更划算**（10 秒只有 100 步，绕远路去拿 20 分反而少捡两个 10 分）。
+所以默认 `detour=0`。要复现：
+
+```bash
+python3 -m contestant.run_experiments --maps 100
+```
+
+### 6.3 `Agent` 处理的是"丢分点"，不是"聪明点"
+
+比赛里最容易白丢分的几件事，都在 `contestant/agent.py` 里挡住了（都有测试）：
+
+- 同一 Tick 重发 → 不重复决策；旧帧 → 丢弃；
+- 新 `session_id` → 清空上一场的定位、记忆、在途 AI 请求；
+- 阵亡 → 只能 `wait`；出生保护期间 → 不攻击；
+- `self.position`（绝对坐标）和 `visible_entities[].position`（9×9 字符串）**两种解析方式分开**；
+- 字段缺失/类型错 → 不崩，这一 Tick 按 `wait` 处理；
+- 攻击只在**同一行或同一列、1~2 格内**给方向（斜着打不到）。
+
+### 6.4 真实上场
+
+```bash
+source /opt/ros/humble/setup.bash
+export ROS_DOMAIN_ID=27 ROS_LOCALHOST_ONLY=0 RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+export RMTC_SEAT=A RMTC_TEAM_TOKEN=<本场令牌>
+export RMTC_AI_URL=http://<裁判机 IP>:8000/v1/chat/completions
+python3 -m contestant.bot_node --seat A --stage 2          # 先加 --dry-run 看解析对不对
+```
+
+> 诚实交代：`bot_node.py` 需要 ROS 2，**本仓库的测试没有跑到它**（Windows 上没有 rclpy）；
+> 它的逻辑本体在 `agent.py`，那部分有 15 个测试。第二阶段对抗和随机事件也没有模拟器，
+> 只能靠官方练习裁判 + 实机验证。
+
+## 7. 常见问题
 
 | 现象 | 原因 / 处理 |
 |---|---|
@@ -176,13 +271,17 @@ hint = understanding.hint(session_id, tick)     # 拿不到就是 None，本地�
 | 虚拟机里 `./start_gateway.sh: Permission denied` | vmrun 拷贝会丢文件模式：`chmod +x start_gateway.sh` |
 | 想连真实模型验证 | `--upstream https://…/v1/chat/completions --upstream-key "$KEY"` |
 
-## 7. 实测记录（真实输出，不是示意）
+## 8. 实测记录（真实输出，不是示意）
 
 写这份代码时在本机跑过的结果，原文粘贴：
 
 ```text
-$ python3 run_tests.py
+$ python3 run_tests.py          # 网关+客户端那轮（45 个）
 Ran 45 tests in 24.369s
+OK
+
+$ python3 run_tests.py          # 加上参赛代码测试之后（60 个）
+Ran 60 tests in 24.940s
 OK
 ```
 
@@ -220,7 +319,7 @@ ok(21ms) '{"mock": true, "note": "本地模拟上游：只验证网关链路与�
  "code": null, "model": "mock-llm", "bytes": 45, "seat": "B", "latency_ms": 0.2}
 ```
 
-## 8. 把仓库弄进虚拟机
+## 9. 把仓库弄进虚拟机
 
 宿主机上（Windows，路径按实际情况改）：
 
@@ -238,7 +337,7 @@ cd ~/rmtc-llm-gateway && python3 run_tests.py
 在虚拟机里起网关后，参赛程序用 `127.0.0.1:8000` 就能连（同一台机器），
 别的机器要连就把地址换成虚拟机 IP，并确认网关监听在 `0.0.0.0`（默认）。
 
-## 9. 依据的文档
+## 10. 依据的文档
 
 - 《RMTC 机甲大师图灵对决赛赛事规则 v1.1》
 - 《RMTC 机甲大师图灵对决赛通信协议 v1.1》§3 感知 / §5 LLM 网关 / §7 联调
