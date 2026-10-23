@@ -45,10 +45,10 @@ curl -s http://127.0.0.1:8000/v1/chat/completions \
 python3 examples/llm_demo.py
 ```
 
-跑测试（60 个，只用标准库，本机实测约 25 秒——时间主要花在超时/退避那几个用例上）：
+跑测试（63 个，只用标准库，本机实测约 25 秒——时间主要花在超时/退避那几个用例上）：
 
 ```bash
-python3 run_tests.py -v      # → Ran 60 tests in 24.940s / OK
+python3 run_tests.py -v      # → Ran 63 tests / OK
 ```
 
 ## 1. 目录结构
@@ -84,13 +84,15 @@ rmtc-llm-gateway/
 ├── 测试（按上面三块分文件）─────────────────────────────
 │   tests/test_gateway.py      ①  26 个：每个错误码、配额、并发、审计
 │   tests/test_client.py       ②  19 个：超时/降级/退避/公告理解/JSON 抽取
-│   tests/test_contestant.py   ③  15 个：模拟器、策略、Agent、9×9 解析
-│   run_tests.py               一条命令跑完 60 个测试
+│   tests/test_contestant.py   ③  18 个：模拟器、策略、Agent、9×9 解析、撞墙回灌
+│   run_tests.py               一条命令跑完 63 个测试
 │
 ├── 文档与脚本
 │   docs/PROTOCOL_MAP.md       协议条款 → 代码 → 测试 的对照表
 │   docs/STRATEGY_NOTES.md     策略实验记录（每次测了什么、结论）
+│   docs/MATCH_LOG.md          官方练习裁判真机实测（得分、踩到的坑、怎么复现）
 │   docs/practice_stage1.json  官方练习包的 stage1 地图配置（原样拷入）
+│   scripts/vm/                在虚拟机里一键跑对局的脚本（runmatch*.sh）
 │   examples/llm_demo.py       不用 ROS 的网关演示
 │   start_gateway.sh           虚拟机里启动网关
 └── README.md
@@ -256,9 +258,26 @@ export RMTC_AI_URL=http://<裁判机 IP>:8000/v1/chat/completions
 python3 -m contestant.bot_node --seat A --stage 2          # 先加 --dry-run 看解析对不对
 ```
 
-> 诚实交代：`bot_node.py` 需要 ROS 2，**本仓库的测试没有跑到它**（Windows 上没有 rclpy）；
-> 它的逻辑本体在 `agent.py`，那部分有 15 个测试。第二阶段对抗和随机事件也没有模拟器，
-> 只能靠官方练习裁判 + 实机验证。
+> 诚实交代：`bot_node.py` 需要 ROS 2，仓库里的单元测试没有覆盖它——
+> 但它已经在**官方练习裁判**上真机跑过（见下一节）。逻辑本体在 `agent.py`，有 18 个测试。
+
+### 6.5 官方练习裁判真机实测（2026-10-23）
+
+虚拟机（Ubuntu 22.04 + ROS 2 Humble）里跑官方练习包 `~/rmtc_practice`：
+
+| 场次 | 得分 | 资源 | 有效伤害 | 任务 | 非法动作 |
+|---|---|---|---|---|---|
+| 第一阶段（第一次） | 8.0 / 40 | 40 / 200 | — | — | 0 |
+| 第一阶段（修完一次） | **40.0 / 40** | 200 / 200 | — | — | 0 |
+| 第二阶段（4 车 + AI） | **60.0 / 60** | 200 / 200 | 300 / 300 | 3 / 3 | 0 |
+
+第一局只有 8 分，是**真机才暴露的 bug**：`agent.py` 传给策略的"已探索格子"永远是空集
+（模拟器里是真实维护的），探索退化成原地乱走；撞墙回执 `E_BLOCKED` 也没回灌成障碍。
+两处修完，同一张图 40/40。完整记录（含裁判 API 用法、虚拟机环境、踩坑）见
+[docs/MATCH_LOG.md](docs/MATCH_LOG.md)。
+
+第二阶段的 AI 是裁判自带的 **mock 网关**（55 次调用全成功），按协议**不算正式 AI 资格**，
+真实事件理解还没验证过。
 
 ## 7. 常见问题
 
@@ -283,6 +302,14 @@ OK
 $ python3 run_tests.py          # 加上参赛代码测试之后（60 个）
 Ran 60 tests in 24.940s
 OK
+
+$ python3 run_tests.py          # 再加撞墙回灌/探索的回归测试（63 个）
+Ran 63 tests in 0.009s
+OK
+
+# 官方练习裁判（虚拟机里，真机）
+stage 1 → A 队 40.0 / 40，resource_value 200/200，invalid_actions 0
+stage 2 → A 队 60.0 / 60，effective_damage 300（满分），mission_completed 3/3，AI mock 55/55
 ```
 
 ```text
