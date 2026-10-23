@@ -44,10 +44,10 @@ curl -s http://127.0.0.1:8000/v1/chat/completions \
 python3 examples/llm_demo.py
 ```
 
-跑测试（45 个，不依赖任何第三方库，2 秒内出结果……实际上这台 Windows 机器约 25 秒）：
+跑测试（45 个，只用标准库，本机实测约 25 秒——时间主要花在超时/退避那几个用例上）：
 
 ```bash
-python3 run_tests.py -v      # → Ran 45 tests ... OK
+python3 run_tests.py -v      # → Ran 45 tests in 24.369s / OK
 ```
 
 ## 1. 目录结构
@@ -176,7 +176,69 @@ hint = understanding.hint(session_id, tick)     # 拿不到就是 None，本地�
 | 虚拟机里 `./start_gateway.sh: Permission denied` | vmrun 拷贝会丢文件模式：`chmod +x start_gateway.sh` |
 | 想连真实模型验证 | `--upstream https://…/v1/chat/completions --upstream-key "$KEY"` |
 
-## 7. 依据的文档
+## 7. 实测记录（真实输出，不是示意）
+
+写这份代码时在本机跑过的结果，原文粘贴：
+
+```text
+$ python3 run_tests.py
+Ran 45 tests in 24.369s
+OK
+```
+
+```text
+$ curl -s http://127.0.0.1:8123/healthz
+{"status": "ok", "gateway": "rmtc-llm-gateway", "version": "1.0.0", "upstream": "mock",
+ "model": "mock-llm", "tokens": 4, "limits": {"ip_window_s": 10.0, "ip_limit": 100,
+ "max_inflight_per_token": 2, "max_body_bytes": 2097152, "upstream_timeout_s": 30.0},
+ "stats": {"requests": 0, "ok": 0, "rejected": 0, "upstream_errors": 0}, "uptime_s": 4.7}
+```
+
+```text
+$ curl -s http://127.0.0.1:8123/v1/chat/completions -H 'Authorization: Bearer practice-B' ...
+call 1 -> 200
+call 2 -> 200
+call 3 -> 200
+call 4 -> 429
+{"error": {"message": "Seat token quota exhausted", "type": "insufficient_quota",
+           "param": null, "code": "quota_exceeded"}}
+```
+
+```text
+$ python3 examples/llm_demo.py --token practice-A
+ok(21ms) '{"mock": true, "note": "本地模拟上游：只验证网关链路与错误处理…"}'
+（客户端自带 1 秒冷却：两次调用不能贴在一起，省额度也省动作窗）
+[info] 事件理解结果（Tick 50）：{"mock": true, "note": "…"}
+统计： {'offered': 1, 'finished': 1, 'pending': 0,
+       'client': {'attempts': 2, 'ok_calls': 2, 'degraded': '', 'last_code': ''}}
+```
+
+审计日志（每请求一行，没有令牌原文）：
+
+```json
+{"ts": 1792761557.97, "ip": "127.0.0.1", "path": "/v1/chat/completions", "status": 200,
+ "code": null, "model": "mock-llm", "bytes": 45, "seat": "B", "latency_ms": 0.2}
+```
+
+## 8. 把仓库弄进虚拟机
+
+宿主机上（Windows，路径按实际情况改）：
+
+```bash
+# 方式一：先用 SSH 拉（虚拟机里已有网络即可）
+git clone git@github.com:<你的账号>/rmtc-llm-gateway.git ~/rmtc-llm-gateway
+chmod +x ~/rmtc-llm-gateway/start_gateway.sh
+cd ~/rmtc-llm-gateway && python3 run_tests.py
+
+# 方式二：用 vmrun 直接把目录拷进去（不需要网络）
+#   vmrun -T ws -gu rogers -gp <密码> copyFileFromHostToGuest <vmx> <宿主机文件> <虚拟机路径>
+#   注意 vmrun 会丢掉文件模式，拷完要 chmod 644 / chmod +x
+```
+
+在虚拟机里起网关后，参赛程序用 `127.0.0.1:8000` 就能连（同一台机器），
+别的机器要连就把地址换成虚拟机 IP，并确认网关监听在 `0.0.0.0`（默认）。
+
+## 9. 依据的文档
 
 - 《RMTC 机甲大师图灵对决赛赛事规则 v1.1》
 - 《RMTC 机甲大师图灵对决赛通信协议 v1.1》§3 感知 / §5 LLM 网关 / §7 联调
