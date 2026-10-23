@@ -1,0 +1,9 @@
+== stage 1 结果 ==
+Traceback (most recent call last):
+  File "<stdin>", line 2, in <module>
+  File "/usr/lib/python3.10/os.py", line 680, in __getitem__
+    raise KeyError(key) from None
+KeyError: 'STATE_FILE'
+== bot 日志尾部 ==
+[INFO] [1792763457.382022325] [rmtc_bot_A]: 席位 A 就绪：订阅 /team_A/perception，发布 /team_A/action（stage 1）
+[INFO] [1792763465.407377015] [rmtc_bot_A]: 新场次 practice-5773bb332d824861b506d639d4a0ab28：清空上一场的定位、记忆与在途 AI 请求

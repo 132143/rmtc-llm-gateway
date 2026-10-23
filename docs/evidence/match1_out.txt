@@ -1,0 +1,27 @@
+== 清场 ==
+== 启动官方练习裁判（stage 1）==
+裁判就绪（4s）
+== 启动我们的车（contestant.bot_node，席位 A）==
+（bot 日志前 5 行）
+[INFO] [1792763322.216388673] [rmtc_bot_A]: 席位 A 就绪：订阅 /team_A/perception，发布 /team_A/action（stage 1）
+== 开局 ==
+{"ok": true, "session_id": "practice-de6a6fa9bb384e67b107914a106ac38e"}
+== 结果 ==
+session_id: practice-de6a6fa9bb384e67b107914a106ac38e
+board keys: ['tick', 'stage', 'teams', 'map_view']
+[{"team": "A", "team_name": "A", "score": 0, "hp": 100}, {"team": "B", "team_name": "B", "score": 0, "hp": 100}, {"team": "C", "team_name": "C", "score": 0, "hp": 100}, {"team": "D", "team_name": "D", "score": 0, "hp": 100}]
+== bot 日志尾部 ==
+[INFO] [1792763322.216388673] [rmtc_bot_A]: 席位 A 就绪：订阅 /team_A/perception，发布 /team_A/action（stage 1）
+== 通信日志（最后 2 条）==
+bot-logs
+practice-369de89744bc42dcaf1517e51c4713ee
+practice-6ae9779c275549248aa5589f102e8667
+practice-c7d0812ab56f4cd4a4e2508ba3cccc12
+practice-c964209b65084df1bd0aa3b4041039d5
+--- /home/rogers/.rmtc-practice/practice-6ae9779c275549248aa5589f102e8667/communication.jsonl
+{"seat": "A", "kind": "perception", "data": {"event_text": "", "map": {"height": 18, "width": 18}, "mission_text": "练习采集：自主收集资源。", "missions": [], "score": {"effective_damage": 0.0, "invalid_actio
+{"seat": "A", "kind": "action", "data": {"action": "move", "direction": "right", "session_id": "practice-6ae9779c275549248aa5589f102e8667", "tick": 100}}
+--- /home/rogers/.rmtc-practice/practice-c964209b65084df1bd0aa3b4041039d5/communication.jsonl
+{"seat": "A", "kind": "perception", "data": {"event_text": "", "map": {"height": 18, "width": 18}, "mission_text": "练习采集：自主收集资源。", "missions": [], "score": {"effective_damage": 0.0, "invalid_actio
+{"seat": "A", "kind": "action", "data": {"tick": 100, "session_id": "practice-c964209b65084df1bd0aa3b4041039d5", "action": "move", "direction": "right"}}
+== 收场 ==
