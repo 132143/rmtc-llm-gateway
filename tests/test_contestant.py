@@ -573,6 +573,18 @@ class TestAgent(unittest.TestCase):
         self.assertEqual(action["action"], "move")
         self.assertEqual(action["direction"], "right")
 
+    def test_reach_clears_occupant_by_attacking(self):
+        """实测：任务点被别的车长期占住时，我们对着它撞了 50+ 次 E_BLOCKED —— 应该打掉占位者。"""
+        agent = Agent(AgentConfig(seat="A", stage=2, combat_mode="hybrid",
+                                  reach_after_tick=10, low_hp=30))
+        mission = [{"id": "reach_target", "type": "reach", "position": [9, 9]}]
+        agent.on_perception(perception(tick=0, pos=(8, 9), hp=100, missions=mission))
+        action = agent.on_perception(perception(tick=20, pos=(8, 9), hp=100,
+                                                robots=((1, 0),), missions=mission))
+        self.assertEqual(action["action"], "attack")
+        self.assertEqual(action["direction"], "right")
+        self.assertGreaterEqual(agent.reach_clear_attacks, 1)
+
     def test_defend_does_not_lock_the_robot(self):
         """真机踩过：血量长期 20 时连续 251 帧都在防御，任务与伤害全丢。"""
         agent = self.make_agent(stage=2, low_hp=30, reach_after_tick=10)

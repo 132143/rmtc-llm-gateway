@@ -120,6 +120,7 @@ class Agent:
         self.buff_moves = 0            # 为抢增益走了几步（复盘用）
         self.buff_attacks = 0          # 利用增益的 5×5 攻击次数
         self.reach_moves = 0           # 为完成任务点走了几步
+        self.reach_clear_attacks = 0   # 为清开任务点占位者而攻击的次数
         self._last_defend_tick = -99   # 上次防御的 Tick（防止连续防御把自己锁死）
         self.first_tick = None         # 本场第一条感知的 tick
         self.late_join = False         # 开局晚于 tick 5：开局资源大概率已被抢光
@@ -351,6 +352,11 @@ class Agent:
                 direction = step_toward(self.pos, reach_target,
                                         self._blocked_now(),
                                         self.width, self.height)
+                # 目标格被别的车占着（实测卡在相邻格 90+ 帧、E_BLOCKED 50+ 次）：
+                # 阵亡的车不占格，所以占位者是活的——先把它打掉再进。
+                if direction and self._enemy_at(direction, enemies) and not me.get("protected"):
+                    self.reach_clear_attacks += 1
+                    return {"action": "attack", "direction": direction}
                 if direction:
                     self.reach_moves += 1
                     return self._move(direction)
@@ -747,6 +753,12 @@ class Agent:
             self.transient_blocked[blocked] = self.last_tick + 8
         if self.strategy is not None:
             self.strategy.seen_resources.pop(blocked, None)
+
+    def _enemy_at(self, direction, enemies):
+        """下一步的格子上有没有敌方战车。"""
+        dx, dy = DIRECTIONS.get(direction, (0, 0))
+        nxt = (self.pos[0] + dx, self.pos[1] + dy)
+        return any(epos == nxt for _entity, epos in enemies)
 
     def _blocked_now(self):
         """当前有效的障碍集合 = 静态障碍 + 还没过期的临时堵塞。"""
