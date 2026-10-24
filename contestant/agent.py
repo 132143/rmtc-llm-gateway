@@ -212,6 +212,7 @@ class Agent:
             "resource_value": score.get("resource_value"),
             "effective_damage": score.get("effective_damage"),
             "missions": score.get("mission_completed"),
+            "mission_ids": score.get("mission_completed_ids"),
             "action": payload.get("action"),
             "direction": payload.get("direction"),
             "combat": self.cfg.combat_mode,
