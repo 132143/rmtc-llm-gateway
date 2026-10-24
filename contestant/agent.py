@@ -120,6 +120,8 @@ class Agent:
         self.buff_attacks = 0          # 利用增益的 5×5 攻击次数
         self.reach_moves = 0           # 为完成任务点走了几步
         self._last_defend_tick = -99   # 上次防御的 Tick（防止连续防御把自己锁死）
+        self.first_tick = None         # 本场第一条感知的 tick
+        self.late_join = False         # 开局晚于 tick 5：开局资源大概率已被抢光
         self.deaths = 0                # 本场阵亡次数（复盘与实验统计用）
         self.mission_moves = 0         # 为完成任务主动走了几步（复盘用）
         self.patrol_moves = 0          # 空闲巡逻走了几步（复盘用）
@@ -155,6 +157,10 @@ class Agent:
             self.stats["skipped"] += 1
             return None
         self.last_tick = tick
+        if self.first_tick is None:
+            self.first_tick = tick
+            # 晚 join（实测晚 26 Tick 就会丢掉全部开局资源）：改为"抢不到就吃任务+对抗"
+            self.late_join = tick > 5
         self.stats["perceptions"] += 1
 
         me = data.get("self") if isinstance(data.get("self"), dict) else {}
@@ -331,7 +337,11 @@ class Agent:
                     self._last_defend_tick = self.last_tick
                     return {"action": "defend"}
             # 任务点优先于"追人"：实测镜像局里 reach 任务被追击挤掉，白丢 5 分
-            if reach_pending and self.last_tick >= self.cfg.reach_after_tick and hp > 15:
+            nothing_to_collect = (self.last_tick >= 60 and not self.strategy.seen_resources
+                                  and not self._resources(data))
+            go_reach_now = (self.last_tick >= self.cfg.reach_after_tick or self.late_join
+                            or nothing_to_collect)
+            if reach_pending and go_reach_now and hp > 15:
                 direction = step_toward(self.pos, reach_target,
                                         self.strategy.blocked | self.known_obstacles,
                                         self.width, self.height)
@@ -460,7 +470,11 @@ class Agent:
         # 已经站在目标格上：交给正常策略（这一 Tick 就会采集）
         if target == self.pos or distance == 0:
             return None
-        if self.cfg.mission_max_distance and distance > self.cfg.mission_max_distance:
+        limit = self.cfg.mission_max_distance
+        if limit and wanted == "high_resources" and self.last_tick < 150:
+            # 高价值资源只有 4 个，抢不到就白丢 5 分；前期放宽到 12 格
+            limit = max(limit, 12)
+        if limit and distance > limit:
             return None      # 太远：先按普通策略就近抢，别为一个任务跑半张图
         direction = step_toward(self.pos, target, self.strategy.blocked | self.known_obstacles,
                                 self.width, self.height)
