@@ -314,7 +314,7 @@ class TestSuccessAndQuota(GatewayCase):
 
             thread = threading.Thread(target=first)
             thread.start()
-            time.sleep(0.2)
+            time.sleep(0.3)   # 等第一个请求真的进入在途状态
             results["second"] = self.post(self.chat())
             thread.join(5)
             self.assertEqual(results["second"][0], 429)

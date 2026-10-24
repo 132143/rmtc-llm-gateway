@@ -72,12 +72,35 @@ class RmtcBotNode(Node):
         self.publisher = self.create_publisher(String, f"/team_{seat}/action", qos)
         self.subscription = self.create_subscription(
             String, f"/team_{seat}/perception", self.on_perception, qos)
+        # 失联看门狗：现场最常见的坑是"以为连上了"，其实是 QoS/域号/发现没通。
+        self.last_perception_at = None
+        self.started_at = self.get_clock().now()
+        self.create_timer(2.0, self.watchdog)
         self.get_logger().info(
             f"席位 {seat} 就绪：订阅 /team_{seat}/perception，发布 /team_{seat}/action"
             f"（stage {stage}，策略 {self.agent.cfg.strategy}，战斗 {self.agent.cfg.combat_mode}，"
             f"reach_after_tick {self.agent.cfg.reach_after_tick}）")
 
+    def watchdog(self):
+        now = self.get_clock().now()
+        if os.environ.get("RMTC_WATCHDOG_DEBUG"):
+            started = (now - self.started_at).nanoseconds / 1e9
+            self.get_logger().info(f"[watchdog] tick at {started:.1f}s, "
+                                   f"last_perception={self.last_perception_at}")
+        if self.last_perception_at is None:
+            if (now - self.started_at).nanoseconds / 1e9 > 5.0:
+                self.get_logger().warn(
+                    "5 秒没收到任何感知：检查 ROS_DOMAIN_ID / ROS_LOCALHOST_ONLY=0 / "
+                    "RMW_IMPLEMENTATION / 席位是否选对 / 裁判是否已开局")
+                self.started_at = now          # 每 5 秒提醒一次，别刷屏
+            return
+        gap = (now - self.last_perception_at).nanoseconds / 1e9
+        if gap > 3.0:
+            self.get_logger().warn(f"已经 {gap:.1f} 秒没有新感知（比赛暂停？网络断了？）")
+            self.last_perception_at = now
+
     def on_perception(self, msg):
+        self.last_perception_at = self.get_clock().now()
         try:
             data = json.loads(msg.data)
         except (TypeError, ValueError) as exc:
