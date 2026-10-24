@@ -40,7 +40,8 @@ class AgentConfig:
     combat_mode:
         "never"          第二阶段也不打人（纯采集）
         "opportunistic"  已经进入直线 1~2 格就出手
-        "resource_first" 先采集：资源价值达到 resource_threshold 之前不打人（默认）
+        "resource_first" 先采集：资源价值达到 resource_threshold 之前不打人
+                        （实测在资源被堵的图上更差，只作为对照保留）
         "aggressive"     附近（<= aggressive_range 格）有敌人就主动靠过去
     reach_after_tick: 这个 Tick 之后才去"到达指定坐标"的任务点
     resource_threshold: resource_first 模式的开关线（第二阶段资源分 30 分在 120 价值封顶）
@@ -48,7 +49,7 @@ class AgentConfig:
 
     def __init__(self, seat="A", stage=2, max_hp=100, attack_damage=20,
                  defended_damage=10, low_hp=30, reach_after_tick=250,
-                 vision_radius=4, strategy="greedy", combat_mode="resource_first",
+                 vision_radius=4, strategy="greedy", combat_mode="opportunistic",
                  aggressive_range=4, resource_threshold=120):
         self.seat = seat
         self.stage = stage

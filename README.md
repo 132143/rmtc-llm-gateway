@@ -191,6 +191,18 @@ hint = understanding.hint(session_id, tick)     # 拿不到就是 None，本地�
 | `RMTC_GW_AUDIT` | 空 | 审计日志 jsonl 路径（只有席位、状态码，没有令牌原文） |
 | `RMTC_GW_VERBOSE` | 空 | `1` 打印每条请求 |
 
+### 4.1 参赛程序（`contestant/`）的环境变量／参数
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `RMTC_SEAT` / `--seat` | `A` | 本场席位 |
+| `RMTC_TEAM_TOKEN` | `practice-<席位>` | 本场令牌（调网关用） |
+| `RMTC_AI_URL` | `http://127.0.0.1:8080/v1/chat/completions` | 统一网关地址 |
+| `RMTC_STRATEGY` / `--strategy` | `greedy` | `greedy`（BFS 贪心）/ `snake`（原骨架，做基线对照） |
+| `RMTC_COMBAT_MODE` / `--combat` | `resource_first` | `never` / `opportunistic` / `resource_first` / `aggressive` |
+| `RMTC_REACH_AFTER_TICK` / `--reach-after-tick` | `250` | 这个 Tick 之后才去任务坐标（考虑剩余时间） |
+| `RMTC_TRACE` | 空 | 决策轨迹 jsonl 路径：每 Tick 一行（位置/血量/分数/动作），复盘用 |
+
 ## 5. 边界（说清楚不做什么，避免误会）
 
 1. **不做决策。** 网关只转发与限额；提示词、输出解析、动作合法性、回退，全在参赛程序里。
@@ -278,6 +290,42 @@ python3 -m contestant.bot_node --seat A --stage 2          # 先加 --dry-run �
 
 第二阶段的 AI 是裁判自带的 **mock 网关**（55 次调用全成功），按协议**不算正式 AI 资格**，
 真实事件理解还没验证过。
+
+### 6.6 第一阶段换 9 张图：贪心全部满分
+
+同一套程序只切 `--strategy`，在官方裁判上跑（`scripts/vm/runsweep.sh`）：
+
+| 地图 | 障碍 | greedy | snake（原骨架） |
+|---|---|---|---|
+| official / corners / far_half | 6 / 0 / 0 | **40.0**（200/200） | 8.0 |
+| maze（两道长墙） | 26 | **40.0**（200/200） | 8.0 |
+| random1–3（等密度随机） | 12 | **40.0**（200/200） | 8.0 |
+| big24（24×24） | 16 | **40.0**（200/200） | 未测 |
+| dense40（40 障碍） | 40 | **40.0**（200/200） | 未测 |
+
+9 张图全部 **资源全清、非法动作 0**。snake 都只有 8.0：它 101 步里 96 步是 `move:right`，
+撞墙后原地打转，只能捡出生点附近那三四个资源——与地图无关。
+
+结论：**第一阶段已经封顶，力气应该花在第二阶段。** 地图生成见 `scripts/gen_maps.py`。
+
+### 6.7 第二阶段：四种战斗模式的对照
+
+裁判 API 支持 `tick_ms`/`max_ticks`/`bots`/`config`，所以能把 500 Tick × 500 ms 压成
+200 Tick × 100 ms（20 秒一局）做 A/B（`scripts/vm/stage2_ab.sh`，结果见
+[docs/STAGE2_AB.md](docs/STAGE2_AB.md)）。
+
+单局已经能看出的趋势（噪声很大，对手车会挡路会打人）：
+
+| 模式 | official | open（资源集中） | big24 |
+|---|---|---|---|
+| never（只采集） | 30.0 | 35.0 | 32.5 |
+| opportunistic（进射程就打） | 35.0 | **22.5** | 36.5 |
+| aggressive（主动追人） | 42.5 | 22.5 | 32.5 |
+| resource_first（先采集再打） | 30.0 | 17.5 | **40.0** |
+
+**要点：资源集中的图上"见人就打"是负收益**（伤害打满 320、资源只剩 10 分档位），
+所以默认改成了 `resource_first`；但 official 上 aggressive 反而最高，说明"何时开打"
+跟地图和对手有关，需要重复采样（见 docs/STAGE2_AB.md 的多次均值）。
 
 ## 7. 常见问题
 
