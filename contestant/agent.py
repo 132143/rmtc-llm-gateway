@@ -220,6 +220,8 @@ class Agent:
             "mission_moves": self.mission_moves,
             "deaths": self.deaths,
             "ack": self._last_ack,
+            "buff_moves": self.buff_moves,
+            "buff_attacks": self.buff_attacks,
         }
         try:
             import json
