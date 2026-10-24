@@ -1,0 +1,4 @@
+# 仓库里有 shell 脚本要在 Linux 虚拟机上跑，必须锁死 LF，否则 bash 报 $'\r': command not found
+* text=auto
+*.sh text eol=lf
+*.py text eol=lf
