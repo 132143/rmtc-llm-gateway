@@ -1,6 +1,6 @@
 #!/bin/bash
 # 更严格的第二阶段 A/B：每一"轮"都重起裁判与选手进程，并把模式交错（消除顺序污染）。
-# 用法: stage2_ab2.sh [reps] [ticks] [tickms]
+# 用法: stage2_ab2.sh [reps] [ticks] [tickms] ["模式1 模式2 ..."]
 # 输出 CSV: mode,config,rep,score,resource_value,damage,missions,hp
 
 exec 9>/tmp/stage2_ab2.lock
@@ -12,7 +12,7 @@ TICKMS="${3:-100}"
 REACH=$(( TICKS * 3 / 5 ))
 CFGDIR="$HOME/rmtc-llm-gateway/docs/sweep_stage2"
 CSV=/tmp/stage2_ab2.csv
-MODES="never opportunistic resource_first"
+MODES="${4:-never opportunistic resource_first}"
 : > "$CSV"
 echo "mode,config,rep,score,resource_value,damage,missions,hp" >> "$CSV"
 

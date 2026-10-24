@@ -42,6 +42,7 @@ class AgentConfig:
         "opportunistic"  已经进入直线 1~2 格就出手
         "resource_first" 先采集：资源价值达到 resource_threshold 之前不打人
                         （实测在资源被堵的图上更差，只作为对照保留）
+        "finish"         只在能补刀时出手（视野内敌人血量 <= finish_hp 且已进入直线射程）
         "aggressive"     附近（<= aggressive_range 格）有敌人就主动靠过去
     reach_after_tick: 这个 Tick 之后才去"到达指定坐标"的任务点
     resource_threshold: resource_first 模式的开关线（第二阶段资源分 30 分在 120 价值封顶）
@@ -50,7 +51,7 @@ class AgentConfig:
     def __init__(self, seat="A", stage=2, max_hp=100, attack_damage=20,
                  defended_damage=10, low_hp=30, reach_after_tick=250,
                  vision_radius=4, strategy="greedy", combat_mode="opportunistic",
-                 aggressive_range=4, resource_threshold=120):
+                 aggressive_range=4, resource_threshold=120, finish_hp=60):
         self.seat = seat
         self.stage = stage
         self.max_hp = max_hp
@@ -63,6 +64,7 @@ class AgentConfig:
         self.combat_mode = combat_mode
         self.aggressive_range = aggressive_range
         self.resource_threshold = resource_threshold
+        self.finish_hp = finish_hp
 
 
 class Agent:
@@ -220,7 +222,9 @@ class Agent:
         enemies = self._enemies(data)
         hp = me.get("hp")
         hp = hp if isinstance(hp, (int, float)) else self.cfg.max_hp
-        if self.cfg.combat_mode == "resource_first":
+        if self.cfg.combat_mode == "finish":
+            combat_allowed = True      # 出手门槛由"敌人血量"控制（见下）
+        elif self.cfg.combat_mode == "resource_first":
             # 资源分（30 分）在 120 价值封顶；对抗分（15 分）要 300 有效伤害。
             # 先吃够资源再开打，比一上来对枪划算（官方裁判实测：open 图 35 → 22.5）。
             score = data.get("score") if isinstance(data.get("score"), dict) else {}
@@ -239,6 +243,10 @@ class Agent:
             if combat_allowed:
                 in_range = [e for e in enemies
                             if abs(e[1][0] - self.pos[0]) + abs(e[1][1] - self.pos[1]) <= 2]
+                if self.cfg.combat_mode == "finish":
+                    in_range = [e for e in in_range
+                                if isinstance(e[0].get("hp"), (int, float))
+                                and e[0]["hp"] <= self.cfg.finish_hp]
                 if in_range:
                     target = min(in_range,
                                  key=lambda e: abs(e[1][0] - self.pos[0]) + abs(e[1][1] - self.pos[1]))

@@ -231,6 +231,19 @@ class TestAgent(unittest.TestCase):
         self.assertEqual(lines[0]["tick"], 0)
         self.assertIn(lines[0]["action"], ("move", "attack", "defend", "wait"))
 
+    def test_finish_mode_only_attacks_weak_enemy(self):
+        agent = Agent(AgentConfig(seat="A", stage=2, combat_mode="finish", finish_hp=60))
+        healthy = perception(tick=3, robots=((1, 0),))
+        healthy["visible_entities"][0]["hp"] = 90
+        self.assertNotEqual(agent.on_perception(healthy)["action"], "attack")
+
+        agent2 = Agent(AgentConfig(seat="A", stage=2, combat_mode="finish", finish_hp=60))
+        weak = perception(tick=3, robots=((1, 0),))
+        weak["visible_entities"][0]["hp"] = 40
+        action = agent2.on_perception(weak)
+        self.assertEqual(action["action"], "attack")
+        self.assertEqual(action["direction"], "right")
+
     def test_snake_strategy_can_be_selected(self):
         agent = Agent(AgentConfig(seat="A", stage=1, strategy="snake"))
         agent.on_perception(perception(tick=0, pos=(8, 8)))
