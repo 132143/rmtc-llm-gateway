@@ -118,6 +118,7 @@ class Agent:
         self._buff_until = None        # 增益区域存在到哪个 Tick
         self.buff_moves = 0            # 为抢增益走了几步（复盘用）
         self.buff_attacks = 0          # 利用增益的 5×5 攻击次数
+        self.reach_moves = 0           # 为完成任务点走了几步
         self.deaths = 0                # 本场阵亡次数（复盘与实验统计用）
         self.mission_moves = 0         # 为完成任务主动走了几步（复盘用）
         self.patrol_moves = 0          # 空闲巡逻走了几步（复盘用）
@@ -297,6 +298,9 @@ class Agent:
             if escape:
                 return self._move(escape)
 
+        reach_target = self._reach_target()
+        reach_pending = (reach_target is not None and not self.reach_done
+                         and self.pos is not None and self.pos != reach_target)
         enemies = self._enemies(data)
         buff_move = self._buff_camp_move(enemies, data)
         if buff_move is not None:
@@ -317,11 +321,19 @@ class Agent:
             combat_allowed = self.cfg.combat_mode != "never"
 
         if self.cfg.stage >= 2 and self.cfg.combat_mode != "never":
-            # 保命优先：血少且敌人近，先防（这条不受"先采集"策略影响）
+            # 保命优先：血少且敌人近，先防（这条不受任何策略影响）
             if hp <= self.cfg.low_hp and enemies:
                 nearest = min(abs(e[1][0] - self.pos[0]) + abs(e[1][1] - self.pos[1]) for e in enemies)
                 if nearest <= 3:
                     return {"action": "defend"}
+            # 任务点优先于"追人"：实测镜像局里 reach 任务被追击挤掉，白丢 5 分
+            if reach_pending and self.last_tick >= self.cfg.reach_after_tick and hp > 40:
+                direction = step_toward(self.pos, reach_target,
+                                        self.strategy.blocked | self.known_obstacles,
+                                        self.width, self.height)
+                if direction:
+                    self.reach_moves += 1
+                    return self._move(direction)
             if combat_allowed:
                 in_range = [e for e in enemies
                             if abs(e[1][0] - self.pos[0]) + abs(e[1][1] - self.pos[1]) <= 2]
@@ -362,16 +374,8 @@ class Agent:
                     self.opening_moves += 1
                     return self._move(direction)
 
-        reach_target = self._reach_target()
-        if reach_target is not None and self.cfg.stage >= 2:
-            if self.pos == reach_target:
-                self.reach_done = True
-            elif not self.reach_done and self.last_tick >= self.cfg.reach_after_tick:
-                direction = step_toward(self.pos, reach_target,
-                                        self.strategy.blocked | self.known_obstacles,
-                                        self.width, self.height)
-                if direction:
-                    return self._move(direction)
+        if reach_pending and self.pos == reach_target:
+            self.reach_done = True
 
         from contestant.sim import View
         resources = self._resources(data)
