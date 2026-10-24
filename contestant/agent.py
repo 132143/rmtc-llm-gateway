@@ -500,9 +500,12 @@ class Agent:
         # 实测教训：为了躲 30 HP 的辣椒线反复横跳，会被对手抢光资源（一局从 45 掉到 32.5）。
         level = parsed.get("danger_level")
         hp = self._last_hp
+        short_hazard = (isinstance(until, (int, float))
+                        and 0 <= int(until) - self.last_tick <= 25)   # 短时危险（≤25 Tick）
         if level == "fatal":
             pass
-        elif level == "damage" and isinstance(hp, (int, float)) and hp <= 60:
+        elif level == "damage" and (not isinstance(hp, (int, float)) or hp <= 60
+                                    or short_hazard):
             pass
         else:
             return None
