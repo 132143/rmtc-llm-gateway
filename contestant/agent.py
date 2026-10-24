@@ -98,6 +98,7 @@ class Agent:
         self.ai_confirmed = False      # 本场是否已经有过成功的 AI 调用（规则要求 ≥1）
         self._hint = None              # 最近一次可用的模型提示（含幻术/威胁区）
         self.effects_applied = 0       # 按模型提示改过几次动作（复盘用）
+        self.mission_moves = 0         # 为完成任务主动走了几步（复盘用）
         self.stats = {"perceptions": 0, "actions": 0, "skipped": 0}
 
     # ---------- 日志 ----------
@@ -297,6 +298,10 @@ class Agent:
                     if direction:
                         return self._move(direction)
 
+        mission_move = self._mission_resource_move(data)
+        if mission_move:
+            return mission_move
+
         reach_target = self._reach_target()
         if reach_target is not None and self.cfg.stage >= 2:
             if self.pos == reach_target:
@@ -333,6 +338,58 @@ class Agent:
                 return {"action": "wait"}
             return self._move(action["direction"])
         return action
+
+    def _mission_resource_move(self, data):
+        """任务里的"至少 N 个某类资源"只值 5 分，但只要还没完成、又看得见/记得目标，就该先去。
+
+        规则 §10.1：每个任务 ID 只结算一次，完成后不撤销；任务判定在战斗后，只为存活车辆检查。
+        这里只挑"还没完成的那个资源任务"里最近的资源，避免为了 5 分把整局时间耗掉。
+        """
+        if self.strategy is None or self.pos is None or self.cfg.stage < 2:
+            return None
+        score = data.get("score") if isinstance(data.get("score"), dict) else {}
+        completed = score.get("mission_completed_ids")
+        completed = set(completed) if isinstance(completed, list) else set()
+
+        wanted = None
+        for mission in self.missions:
+            if not isinstance(mission, dict):
+                continue
+            kind = mission.get("type")
+            if kind not in ("high_resources", "normal_resources"):
+                continue
+            if mission.get("id") in completed:
+                continue
+            wanted = kind
+            break
+        if wanted is None:
+            return None
+
+        # 记忆 + 本帧可见（任务检查发生在 strategy.observe 之前，所以要合并当前可见资源）
+        seen = dict(self.strategy.seen_resources)
+        for pos, value in self._resources(data):
+            seen[pos] = value
+
+        candidates = []
+        for (x, y), value in seen.items():
+            is_high = value >= 20
+            if wanted == "high_resources" and not is_high:
+                continue
+            if wanted == "normal_resources" and is_high:
+                continue
+            candidates.append((abs(x - self.pos[0]) + abs(y - self.pos[1]), (x, y)))
+        if not candidates:
+            return None
+        distance, target = min(candidates)
+        # 已经站在目标格上：交给正常策略（这一 Tick 就会采集）
+        if target == self.pos or distance == 0:
+            return None
+        direction = step_toward(self.pos, target, self.strategy.blocked | self.known_obstacles,
+                                self.width, self.height)
+        if not direction:
+            return None
+        self.mission_moves += 1
+        return self._move(direction)
 
     def _threat_escape(self, parsed):
         """LLM 给的威胁矩形：如果本车在里面，就朝最近的矩形外走一步。

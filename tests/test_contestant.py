@@ -260,6 +260,26 @@ class TestAgent(unittest.TestCase):
         agent.on_perception(perception(tick=3))          # 到点亮心跳
         self.assertEqual(offers, ["__heartbeat__"])
 
+    def test_unfinished_high_value_mission_is_chased(self):
+        """任务"至少 1 个高价值资源"值 5 分；没完成时要优先去高价值资源，而不是最近的普通资源。"""
+        agent = self.make_agent(stage=2)
+        frame = perception(tick=10, pos=(8, 8), resources=(((1, 0), 10), ((4, 0), 20)),
+                           missions=[{"id": "collect_high_value", "type": "high_resources", "target": 1},
+                                     {"id": "collect_two_normal", "type": "normal_resources", "target": 2}])
+        frame["score"] = {"resource_value": 0, "mission_completed_ids": []}
+        action = agent.on_perception(frame)
+        self.assertEqual(action["action"], "move")
+        self.assertEqual(action["direction"], "right")     # 高价值在右边 4 格
+        self.assertGreaterEqual(agent.mission_moves, 1)
+
+    def test_finished_mission_does_not_hijack(self):
+        agent = self.make_agent(stage=2)
+        frame = perception(tick=10, pos=(8, 8), resources=(((4, 0), 20),),
+                           missions=[{"id": "collect_high_value", "type": "high_resources", "target": 1}])
+        frame["score"] = {"resource_value": 20, "mission_completed_ids": ["collect_high_value"]}
+        agent.on_perception(frame)
+        self.assertEqual(agent.mission_moves, 0)
+
     def test_illusion_reverses_move_only(self):
         """规则 §8.3：幻术让 MOVE 上下左右互换，ATTACK 方向不反转。"""
         agent = self.make_agent(stage=2)
