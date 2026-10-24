@@ -32,7 +32,7 @@ DECISION_TYPES = {
                  "detour": 6.0, "stage": 1},
     # ---------------- 第二阶段（MOVE/ATTACK/DEFEND/WAIT）----------------
     # 经济主导：资源权重最高，只在顺路/拦截位置出手（默认）
-    "economy": {"strategy": "greedy", "combat_mode": "hybrid", "planner": "guarded",
+    "economy": {"strategy": "greedy", "combat_mode": "opportunistic", "planner": "guarded",
                 "stage": 2},
     # 伤害主导：开战阈值下调、允许追击与伏击（收益表内核的表达方式）
     "pressure": {"strategy": "greedy", "combat_mode": "hybrid", "planner": "guarded",
@@ -46,8 +46,9 @@ DECISION_TYPES = {
     # ---------------- 兼容旧登记名（封存前的老三样）----------------
     "collect": {"strategy": "greedy", "combat_mode": "never", "planner": "guarded",
                 "stage": 2, "alias_of": "turtle"},
+    # 封存默认走 pressure（hybrid）：前二率最高（0.708 vs 0.688），动作组合也可观测地不同。
     "balanced": {"strategy": "greedy", "combat_mode": "hybrid", "planner": "guarded",
-                 "stage": 2, "alias_of": "economy"},
+                 "stage": 2, "alias_of": "pressure"},
     "combat": {"strategy": "greedy", "combat_mode": "hybrid", "planner": "guarded",
                "stage": 2, "alias_of": "pressure"},
 }
