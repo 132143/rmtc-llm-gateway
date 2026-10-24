@@ -121,6 +121,8 @@ class Agent:
         self.buff_attacks = 0          # 利用增益的 5×5 攻击次数
         self.reach_moves = 0           # 为完成任务点走了几步
         self.reach_clear_attacks = 0   # 为清开任务点占位者而攻击的次数
+        self.reach_blocked = 0         # 连续撞任务点的次数
+        self.reach_cooldown_until = -1 # 撞不开就先去做别的，过一会儿再来
         self._last_defend_tick = -99   # 上次防御的 Tick（防止连续防御把自己锁死）
         self.first_tick = None         # 本场第一条感知的 tick
         self.late_join = False         # 开局晚于 tick 5：开局资源大概率已被抢光
@@ -348,16 +350,24 @@ class Agent:
             # 注意：晚开局**不**提前冲任务点——四席环境里晚 5~30 Tick 是常态，
             # 提前改去任务点会让整局抢不到资源（实测 rv=0、只剩 1 个任务）。
             go_reach_now = (self.last_tick >= self.cfg.reach_after_tick or nothing_to_collect)
-            if reach_pending and go_reach_now and hp > 15:
+            if self.last_tick < self.reach_cooldown_until:
+                pass            # 刚撞不开：这一段时间先按普通策略走（抢资源/打人），过会儿再来
+            elif reach_pending and go_reach_now and hp > 15:
                 direction = step_toward(self.pos, reach_target,
                                         self._blocked_now(),
                                         self.width, self.height)
                 # 目标格被别的车占着（实测卡在相邻格 90+ 帧、E_BLOCKED 50+ 次）：
-                # 阵亡的车不占格，所以占位者是活的——先把它打掉再进。
+                # 阵亡的车不占格，所以占位者是活的——同排同列时先把它打掉再进。
                 if direction and self._enemy_at(direction, enemies) and not me.get("protected"):
                     self.reach_clear_attacks += 1
                     return {"action": "attack", "direction": direction}
-                if direction:
+                if direction and self._last_ack and self._last_ack.get("error") == "E_BLOCKED":
+                    self.reach_blocked += 1
+                    if self.reach_blocked >= 4:
+                        # 反复撞不开（占位者可能是斜向/打不到）：先去做别的 15 Tick
+                        self.reach_cooldown_until = self.last_tick + 15
+                        self.reach_blocked = 0
+                if direction and self.last_tick >= self.reach_cooldown_until:
                     self.reach_moves += 1
                     return self._move(direction)
             if combat_allowed:
