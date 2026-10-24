@@ -340,11 +340,12 @@ class Agent:
             # 任务点优先于"追人"：实测镜像局里 reach 任务被追击挤掉，白丢 5 分
             # 只有"确实见过资源、现在一个都没有了"才算没得捡；
             # 开局本来就没记忆，不能据此提前放弃搜索（实测会让分数掉到 3 分）。
-            nothing_to_collect = (self.resources_ever_seen > 0
+            nothing_to_collect = (self.last_tick >= 150 and self.resources_ever_seen > 0
                                   and not self.strategy.seen_resources
                                   and not self._resources(data))
-            go_reach_now = (self.last_tick >= self.cfg.reach_after_tick or self.late_join
-                            or nothing_to_collect)
+            # 注意：晚开局**不**提前冲任务点——四席环境里晚 5~30 Tick 是常态，
+            # 提前改去任务点会让整局抢不到资源（实测 rv=0、只剩 1 个任务）。
+            go_reach_now = (self.last_tick >= self.cfg.reach_after_tick or nothing_to_collect)
             if reach_pending and go_reach_now and hp > 15:
                 direction = step_toward(self.pos, reach_target,
                                         self.strategy.blocked | self.known_obstacles,
@@ -477,9 +478,6 @@ class Agent:
         if target == self.pos or distance == 0:
             return None
         limit = self.cfg.mission_max_distance
-        if limit and wanted == "high_resources" and self.last_tick < 150:
-            # 高价值资源只有 4 个，抢不到就白丢 5 分；前期放宽到 12 格
-            limit = max(limit, 12)
         if limit and distance > limit:
             return None      # 太远：先按普通策略就近抢，别为一个任务跑半张图
         direction = step_toward(self.pos, target, self.strategy.blocked | self.known_obstacles,

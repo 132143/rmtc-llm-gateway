@@ -522,17 +522,16 @@ class TestAgent(unittest.TestCase):
         self.assertIn(action["direction"], ("right", "down"))
         self.assertGreaterEqual(agent.reach_moves, 1)
 
-    def test_late_join_goes_for_reach_early(self):
-        """实测晚 join 26 Tick 会丢掉全部开局资源；这时应尽早去任务点，而不是死等 250 Tick。"""
+    def test_late_join_does_not_skip_collecting(self):
+        """晚开局不提前冲任务点：四席环境晚 5~30 Tick 是常态，提前改去任务点会抢不到资源。"""
         agent = Agent(AgentConfig(seat="A", stage=2, combat_mode="hybrid", reach_after_tick=250))
-        agent.on_perception(perception(tick=30, pos=(3, 3), hp=100,
-                                      missions=[{"id": "reach_target", "type": "reach",
-                                                 "position": [9, 9]}]))
+        mission = [{"id": "reach_target", "type": "reach", "position": [9, 9]}]
+        agent.on_perception(perception(tick=30, pos=(3, 3), hp=100, missions=mission))
         self.assertTrue(agent.late_join)
         action = agent.on_perception(perception(tick=31, pos=(3, 3), hp=100,
-                                                missions=[{"id": "reach_target", "type": "reach",
-                                                           "position": [9, 9]}]))
+                                                resources=(((1, 0), 10),), missions=mission))
         self.assertEqual(action["action"], "move")
+        self.assertNotEqual(action.get("direction"), None)
 
     def test_no_resources_left_goes_for_reach(self):
         """见过资源、后来一个都不剩 → 立刻去任务点（而不是继续空搜）。"""
@@ -542,7 +541,8 @@ class TestAgent(unittest.TestCase):
                                       missions=mission))
         agent.on_perception(perception(tick=1, pos=(4, 3), hp=100, missions=mission))  # 资源已捡走
         agent.explored = {(x, y) for x in range(18) for y in range(18)}
-        action = agent.on_perception(perception(tick=80, pos=(3, 3), hp=100, missions=mission))
+        # 需要 tick ≥150 才认定"确实没资源了"（太早会误判成放弃搜索）
+        action = agent.on_perception(perception(tick=160, pos=(3, 3), hp=100, missions=mission))
         self.assertEqual(action["action"], "move")
 
     def test_never_saw_resources_does_not_skip_searching(self):
