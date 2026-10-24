@@ -54,7 +54,7 @@ class AgentConfig:
                  vision_radius=4, strategy="greedy", combat_mode="hybrid",
                  aggressive_range=4, resource_threshold=120, finish_hp=60,
                  ai_heartbeat_tick=3, strategy_detour=0.0, mission_max_distance=8,
-                 patrol_when_idle=True):
+                 patrol_when_idle=False):
         self.seat = seat
         self.stage = stage
         self.max_hp = max_hp
@@ -77,7 +77,8 @@ class AgentConfig:
         # 大地图上"为了 5 分的任务跑去很远"会拖慢开局抢资源（24×24 实测首个资源 26 Tick 才吃到）。
         self.mission_max_distance = mission_max_distance
         # 闲置巡逻：资源抢完、视野里又没敌人时，向巡逻点移动而不是原地 wait。
-        # 24×24 实测有 277/500 个 Tick 在空等（占 55%）。
+        # 24×24 实测：等待从 ~300 降到 ~10，但分数没升（47.5 vs 50.0），还多挨打（hp 20），
+        # 因为规则里资源"收集后移除且本场不刷新"——巡逻找不到新资源，只会送人头。默认关闭。
         self.patrol_when_idle = patrol_when_idle
 
 

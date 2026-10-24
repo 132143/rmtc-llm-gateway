@@ -439,9 +439,15 @@ class TestAgent(unittest.TestCase):
         action = agent.on_perception(perception(tick=1, pos=(8, 8)))
         self.assertEqual(action["action"], "move")
 
+    def test_patrol_is_off_by_default(self):
+        """负结果也要固定下来：巡逻实测不提分，默认关。"""
+        agent = Agent(AgentConfig(seat="A", stage=2, combat_mode="hybrid"))
+        self.assertFalse(agent.cfg.patrol_when_idle)
+
     def test_patrol_when_idle_and_no_enemy(self):
         """大地图实测 277/500 Tick 在空等；空闲时应该往巡逻点走。"""
-        agent = Agent(AgentConfig(seat="A", stage=2, combat_mode="hybrid"))
+        agent = Agent(AgentConfig(seat="A", stage=2, combat_mode="hybrid",
+                                  patrol_when_idle=True))
         agent.on_perception(perception(tick=0, pos=(6, 6)))
         agent.explored = {(x, y) for x in range(18) for y in range(18)}
         action = agent.on_perception(perception(tick=1, pos=(6, 6)))     # 无资源、无敌人
