@@ -235,3 +235,56 @@ export RMTC_TEAM_NAME='<队名>'
 | 决策轨迹 | `RMTC_TRACE` | 100 Tick 一局写出 101 行 jsonl |
 
 复现脚本：`scripts/vm/`（`verify_*` 两个脚本在宿主机工作区，逻辑与这里描述一致）。
+
+
+---
+
+## 7. 真实 LLM 验证（2026-10-23 深夜，用真实 DeepSeek key）
+
+### 7.1 两条链路都跑通了
+
+| 形态 | 配置 | 结果 |
+|---|---|---|
+| **比赛形态**：bot → 裁判网关 → DeepSeek | `start_referee.sh --stage 2 --ai-mode real` + `PRACTICE_LLM_URL/KEY/MODEL` | 裁判记录 `ai.A = {mode:"real", success:true, success_count:14, attempt_count:14}` → **本场 AI 资格达标**；A 队 45.0 分 |
+| **我们自己的网关**：bot → `rmtc_gateway` → DeepSeek | `--upstream https://api.deepseek.com/v1/chat/completions` | 54 次请求全部 200；延迟中位 914 ms、p90 1119 ms、最大 1413 ms；审计记录 usage |
+
+### 7.2 花费与延迟（实测）
+
+| 项 | 数值 |
+|---|---|
+| 单局（500 Tick）调用次数 | 54 次（客户端预算 60、最小间隔 2 s） |
+| 单局 token | 输入 62,406　输出 2,727 |
+| 单局估算花费 | **约 ¥0.15**（按输入 2 元/M、输出 8 元/M） |
+| 单次调用 prompt 规模 | 约 320 token（公告只送最近 800 字符） |
+
+### 7.3 网关错误分支（真实上游，不消耗 token）
+
+| 场景 | 结果 |
+|---|---|
+| 上游不可达（`--upstream http://127.0.0.1:9/...`） | `502 upstream_unavailable` |
+| 额度用尽（`--quota 1`，打第二次） | `429 quota_exceeded`（第一次 200 正常消耗 1 次） |
+
+### 7.4 模型输出质量（实测样例）
+
+给一段"爆炸 + 幻术"公告，模型原样返回：
+
+```json
+{"threat_zone":[[8,3],[12,7]],"heal_zone":null,"direction_reversed":true,
+ "reversed_until_tick":57,"affects_me":true,
+ "advice":"我在(9,6)处于幻术区内，Tick45起移动将颠倒至Tick57，且此前应避免进入爆炸区。"}
+```
+
+程序消费方式（规则允许"校验模型输出并用于自主规划"）：
+- `direction_reversed`+`reversed_until_tick` → 幻术期间**把 MOVE 方向反过来**（ATTACK 方向不反转，符合 §8.3）；
+- `threat_zone` → 本车在矩形内时先撤到矩形外；
+- 其余字段只记日志，不直接指挥动作。
+
+### 7.5 ⚠️ 一个必须记住的差异：练习包是 v1.0 的 300 封顶
+
+- 练习包 `rules.txt`：`对抗得分 = 15 × min(D / 300, 1)`
+- 官方**赛事规则 v1.1**：`对抗得分 = 15 × min(D / 500, 1)`
+
+同一个局面（资源 90、伤害 320、任务 3），裁判按 300 算给 **52.5**，按 v1.1 的 500 只有 **47.1**。
+
+**结论：练习分数在"伤害 300~500"区间会偏高，最多虚高 5 分。** 看练习成绩时要自己折算一遍，
+别把 52.5 当成正式赛也会拿到的分。
