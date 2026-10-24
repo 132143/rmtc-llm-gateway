@@ -39,6 +39,7 @@ MAP="$1"; REPS="$2"; LINEUP="$3"; A_REAL="$4"
       ( cd /home/rogers/rmtc_practice && nohup ./start_referee.sh --stage 2 > /tmp/ref_t.log 2>&1 & )
       for i in $(seq 1 30); do curl -s -m 1 http://127.0.0.1:8080/api/state > /dev/null 2>&1 && break; sleep 1; done
       BEFORE=$(wc -l < /tmp/gw_t.jsonl 2>/dev/null || echo 0)
+      export REP_ID=$REP
 
       source /opt/ros/humble/setup.bash
       export ROS_DOMAIN_ID=27 ROS_LOCALHOST_ONLY=0 RMW_IMPLEMENTATION=rmw_fastrtps_cpp
@@ -59,19 +60,7 @@ MAP="$1"; REPS="$2"; LINEUP="$3"; A_REAL="$4"
         RMTC_SEAT=$S RMTC_TEAM_TOKEN=$TOK RMTC_AI_URL=$URL RMTC_TRACE=$TRACE \
           nohup python3 -m contestant.bot_node --seat $S --stage 2 $PROF > "$LOGF" 2>&1 &
       done
-      # 开局前确认四席的 action 发布者都已就绪（裁判暂停时不发感知，不能靠 trace 判断）
-      READY=0
-      for w in $(seq 1 30); do
-        READY=1
-        for S in A B C D; do
-          CNT=$(ros2 topic info $(printf '/team_%s/action' "$S") 2>/dev/null | grep -c "Publisher count: 1")
-          [ "$CNT" = "1" ] || READY=0
-        done
-        [ "$READY" = "1" ] && break
-        sleep 1
-      done
-      if [ "$READY" != "1" ]; then echo "有席位 30 秒内未就绪，重跑本局"; continue; fi
-      sleep 2
+      sleep 12
 
       BODY=$(python3 -c "
 import json
@@ -90,8 +79,21 @@ print(json.dumps({'stage':2,'tick_ms':100,'max_ticks':500,'bots':[],'config':cfg
 
       LINES=$(for S in A B C D; do wc -l < $(printf "/tmp/trace_t_%s_%s.jsonl" "$S" "$REP") 2>/dev/null || echo 0; done | sort -n | head -1)
       [ -z "$LINES" ] && LINES=0
-      if [ "$LINES" -lt 100 ]; then
-        echo "校验失败 REP=$REP ATTEMPT=$ATTEMPT：最少一席只有 $LINES 帧，重跑"
+      FIRST=$(python3 - <<'PY'
+import json, os
+first = 10 ** 9
+for seat in "ABCD":
+    path = "/tmp/trace_t_%s_%s.jsonl" % (seat, os.environ.get("REP_ID", "0"))
+    try:
+        with open(path, encoding="utf-8") as fh:
+            first = min(first, json.loads(fh.readline())["tick"])
+    except Exception:
+        pass
+print(first if first < 10 ** 9 else -1)
+PY
+)
+      if [ "$LINES" -lt 100 ] || [ "$FIRST" -gt 5 ]; then
+        echo "校验失败 REP=$REP ATTEMPT=$ATTEMPT：帧数 $LINES 首帧 $FIRST（晚 join），重跑"
         continue
       fi
       python3 - "$MAP" "$LINEUP" "$REP" "$A_REAL" "$((AFTER-BEFORE))" <<'PY'
