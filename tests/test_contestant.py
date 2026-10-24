@@ -439,6 +439,57 @@ class TestAgent(unittest.TestCase):
         action = agent.on_perception(perception(tick=1, pos=(8, 8)))
         self.assertEqual(action["action"], "move")
 
+    def _buff_agent(self, until=400):
+        agent = Agent(AgentConfig(seat="A", stage=2, combat_mode="hybrid"))
+
+        class FakeUnderstanding:
+            def offer(self, *args, **kwargs):
+                return True
+
+            def hint(self, *args, **kwargs):
+                return {"parsed": {"buff_zone": [[8, 8], [10, 10]], "buff_until_tick": until},
+                        "advice": "去堡垒", "tick": 1, "session_id": "m1"}
+
+        agent.understanding = FakeUnderstanding()
+        return agent
+
+    def test_buff_zone_attacks_enemy_within_5x5(self):
+        """规则 §8.5：堡垒增益下 ATTACK 命中 5×5 内全部敌人，不再要求同排同列。"""
+        agent = self._buff_agent()
+        action = agent.on_perception(perception(tick=5, pos=(9, 9), robots=((1, 1),)))
+        self.assertEqual(action["action"], "attack")
+        self.assertGreaterEqual(agent.buff_attacks, 1)
+
+    def test_buff_zone_waits_inside_without_enemy(self):
+        agent = self._buff_agent()
+        action = agent.on_perception(perception(tick=5, pos=(9, 9)))
+        self.assertEqual(action["action"], "wait")
+
+    def test_buff_zone_moves_in_when_outside(self):
+        agent = self._buff_agent()
+        action = agent.on_perception(perception(tick=5, pos=(3, 3)))
+        self.assertEqual(action["action"], "move")
+        self.assertGreaterEqual(agent.buff_moves, 1)
+
+    def test_buff_zone_skipped_when_resources_nearby(self):
+        """资源 30 分 > 对抗 15 分：附近有资源就不去蹲堡垒。"""
+        agent = self._buff_agent()
+        action = agent.on_perception(perception(tick=5, pos=(3, 3), resources=(((1, 0), 10),)))
+        self.assertEqual(action["action"], "move")
+        self.assertEqual(agent.buff_moves, 0)
+
+    def test_buff_zone_skipped_when_damage_already_high(self):
+        agent = self._buff_agent()
+        frame = perception(tick=5, pos=(9, 9), robots=((1, 1),))
+        frame["score"] = {"resource_value": 0, "effective_damage": 450, "mission_completed": 0}
+        action = agent.on_perception(frame)
+        self.assertEqual(agent.buff_attacks, 0)
+
+    def test_expired_buff_zone_is_ignored(self):
+        agent = self._buff_agent(until=2)
+        action = agent.on_perception(perception(tick=50, pos=(9, 9), robots=((1, 1),)))
+        self.assertNotEqual(action["action"], "attack")   # 增益过期，回到普通规则
+
     def test_opening_high_first_prefers_value(self):
         """开局抢高地：视野里 20 分资源比更近的 10 分资源优先。"""
         agent = Agent(AgentConfig(seat="A", stage=2, combat_mode="hybrid",

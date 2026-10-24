@@ -114,6 +114,10 @@ class Agent:
         self.effects_applied = 0       # 按模型提示改过几次动作（复盘用）
         self._last_hp = None           # 上一帧血量（判断"要不要为躲伤害分心"）
         self._last_ack = None          # 上一帧的动作回执（moved / error）
+        self._buff_zone = None         # 模型给出的增益区域（"天下无双"堡垒等）
+        self._buff_until = None        # 增益区域存在到哪个 Tick
+        self.buff_moves = 0            # 为抢增益走了几步（复盘用）
+        self.buff_attacks = 0          # 利用增益的 5×5 攻击次数
         self.deaths = 0                # 本场阵亡次数（复盘与实验统计用）
         self.mission_moves = 0         # 为完成任务主动走了几步（复盘用）
         self.patrol_moves = 0          # 空闲巡逻走了几步（复盘用）
@@ -280,6 +284,8 @@ class Agent:
         hint = self.understanding.hint(self.session_id, self.last_tick) if self.understanding else None
         self._hint = hint
         if hint is not None:
+            self._learn_buff(hint.get("parsed"))
+        if hint is not None:
             # 先按"逐格清单"躲（世界分裂的十字线、火爆辣椒的整行整列都靠它），再退回矩形判断
             avoid = self._avoid_cells_move(hint.get("parsed"))
             if avoid:
@@ -289,6 +295,9 @@ class Agent:
                 return self._move(escape)
 
         enemies = self._enemies(data)
+        buff_move = self._buff_camp_move(enemies, data)
+        if buff_move is not None:
+            return buff_move
         hp = me.get("hp")
         hp = hp if isinstance(hp, (int, float)) else self.cfg.max_hp
         self._last_hp = hp
@@ -448,6 +457,68 @@ class Agent:
             return None
         self.mission_moves += 1
         return self._move(direction)
+
+    def _learn_buff(self, parsed):
+        """记录模型给出的增益区域（"天下无双"堡垒这类：占领后攻击变成 5×5、单次 35 伤害）。
+
+        规则 §8.5：连续停留 10 Tick 达标（练习配置是 4 Tick），增益在堡垒结束时统一失效。
+        我们只需要"进去、别乱跑、有敌人就 5×5 打"。
+        """
+        if not isinstance(parsed, dict):
+            return
+        zone = parsed.get("buff_zone")
+        until = parsed.get("buff_until_tick")
+        if isinstance(zone, list) and len(zone) == 2:
+            try:
+                first, second = zone
+                x1, y1 = int(first[0]), int(first[1])
+                x2, y2 = int(second[0]), int(second[1])
+                self._buff_zone = (min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
+                self._buff_until = int(until) if isinstance(until, (int, float)) else None
+            except (TypeError, ValueError, IndexError):
+                return
+
+    def _buff_active(self):
+        if not self._buff_zone:
+            return False
+        if self._buff_until is not None and self.last_tick > self._buff_until:
+            return False
+        return True
+
+    def _buff_camp_move(self, enemies, data):
+        # 资源优先：附近看得见资源就别去蹲堡垒（资源 30 分 > 对抗 15 分）
+        for pos, _value in self._resources(data):
+            if abs(pos[0] - self.pos[0]) + abs(pos[1] - self.pos[1]) <= 4:
+                return None
+        # 伤害已经够拿满对抗分（v1.1：500）就不必再蹲
+        score = data.get("score") if isinstance(data.get("score"), dict) else {}
+        damage = score.get("effective_damage")
+        if isinstance(damage, (int, float)) and damage >= 400:
+            return None
+        """在增益区内：有敌人且够得着（5×5）就打，没有就待在区里别乱跑。"""
+        if not self._buff_active():
+            return None
+        x1, y1, x2, y2 = self._buff_zone
+        inside = x1 <= self.pos[0] <= x2 and y1 <= self.pos[1] <= y2
+        near = [(e, max(abs(e[1][0] - self.pos[0]), abs(e[1][1] - self.pos[1])))
+                for e in enemies]
+        near = [(e, dist) for e, dist in near if dist <= 2]      # 增益下攻击范围是 2 格（5×5）
+        if inside and near:
+            target = min(near, key=lambda item: item[1])[0]
+            direction = self._line_direction(target[1]) or "right"   # 增益下方向不影响命中
+            self.buff_attacks += 1
+            return {"action": "attack", "direction": direction}
+        if not inside:
+            center = ((x1 + x2) // 2, (y1 + y2) // 2)
+            direction = step_toward(self.pos, center,
+                                    self.strategy.blocked | self.known_obstacles,
+                                    self.width, self.height)
+            if direction:
+                self.buff_moves += 1
+                return self._move(direction)
+        if inside and not near:
+            return {"action": "wait"}         # 待在堡垒里攒停留 Tick，别出去
+        return None
 
     def _best_value_target(self, data, max_distance=8):
         """开局抢高地：视野 + 记忆里，选价值最高的资源（同价值取最近的）。"""
