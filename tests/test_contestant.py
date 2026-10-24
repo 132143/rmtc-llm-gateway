@@ -538,16 +538,44 @@ class TestAgent(unittest.TestCase):
         self.assertEqual(action["action"], "move")
         self.assertNotEqual(action.get("direction"), None)
 
+    def test_early_reach_only_on_large_maps(self):
+        """18×18（练习包）不提前去任务点；20×20 以上（正式赛尺寸）才提前。"""
+        mission = [{"id": "reach_target", "type": "reach", "position": [9, 9]}]
+        small = Agent(AgentConfig(seat="A", stage=2, combat_mode="hybrid", reach_after_tick=250))
+        small.on_perception(perception(tick=0, pos=(3, 3), hp=100, width=18, height=18,
+                                       resources=(((1, 0), 10),), missions=mission))
+        small.on_perception(perception(tick=1, pos=(4, 3), hp=100, width=18, height=18,
+                                       missions=mission))
+        small.explored = {(x, y) for x in range(18) for y in range(18)}
+        small_action = small.on_perception(perception(tick=160, pos=(3, 3), hp=100,
+                                                      width=18, height=18, missions=mission))
+        self.assertFalse(small._is_large_map())
+
+        big = Agent(AgentConfig(seat="A", stage=2, combat_mode="hybrid", reach_after_tick=250))
+        big.on_perception(perception(tick=0, pos=(3, 3), hp=100, width=24, height=24,
+                                     resources=(((1, 0), 10),), missions=mission))
+        big.on_perception(perception(tick=1, pos=(4, 3), hp=100, width=24, height=24,
+                                     missions=mission))
+        big.explored = {(x, y) for x in range(24) for y in range(24)}
+        big_action = big.on_perception(perception(tick=160, pos=(3, 3), hp=100,
+                                                  width=24, height=24, missions=mission))
+        self.assertTrue(big._is_large_map())
+        self.assertEqual(big_action["action"], "move")     # 大图：无资源可捡 → 去任务点
+        # 小图：保持旧行为（全图探完、无资源时不硬冲任务点），这一帧是 wait
+        self.assertEqual(small_action["action"], "wait")
+
     def test_no_resources_left_goes_for_reach(self):
         """见过资源、后来一个都不剩 → 立刻去任务点（而不是继续空搜）。"""
         agent = Agent(AgentConfig(seat="A", stage=2, combat_mode="hybrid", reach_after_tick=250))
         mission = [{"id": "reach_target", "type": "reach", "position": [9, 9]}]
-        agent.on_perception(perception(tick=0, pos=(3, 3), hp=100, resources=(((1, 0), 10),),
-                                      missions=mission))
-        agent.on_perception(perception(tick=1, pos=(4, 3), hp=100, missions=mission))  # 资源已捡走
-        agent.explored = {(x, y) for x in range(18) for y in range(18)}
-        # 需要 tick ≥150 才认定"确实没资源了"（太早会误判成放弃搜索）
-        action = agent.on_perception(perception(tick=160, pos=(3, 3), hp=100, missions=mission))
+        agent.on_perception(perception(tick=0, pos=(3, 3), hp=100, width=24, height=24,
+                                      resources=(((1, 0), 10),), missions=mission))
+        agent.on_perception(perception(tick=1, pos=(4, 3), hp=100, width=24, height=24,
+                                      missions=mission))  # 资源已捡走
+        agent.explored = {(x, y) for x in range(24) for y in range(24)}
+        # 大图 + tick ≥150 + 确实没资源 → 立刻去任务点
+        action = agent.on_perception(perception(tick=160, pos=(3, 3), hp=100,
+                                               width=24, height=24, missions=mission))
         self.assertEqual(action["action"], "move")
 
     def test_never_saw_resources_does_not_skip_searching(self):
