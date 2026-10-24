@@ -29,8 +29,11 @@ from __future__ import annotations
 import random
 import time
 
+from contestant.events import EventEngine
+
 DIRECTIONS = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}
 DIR_LIST = ("up", "down", "left", "right")
+OPPOSITE = {"up": "down", "down": "up", "left": "right", "right": "left"}
 
 HP_MAX = 100
 ATTACK_DAMAGE = 20
@@ -134,7 +137,7 @@ class RobotState:
                  "defending", "last_action", "resource_value", "damage",
                  "normal_count", "high_count", "mission_ids", "deaths",
                  "invalid_actions", "blocked_moves", "attacks", "waits", "moves", "reached",
-                 "pending_attack_direction")
+                 "pending_attack_direction", "forced_wait")
 
     def __init__(self, seat, spawn):
         self.seat = seat
@@ -158,6 +161,7 @@ class RobotState:
         self.moves = 0
         self.reached = False
         self.pending_attack_direction = None
+        self.forced_wait = False
 
 
 def _relative_string(source, target, size=9):
@@ -179,7 +183,7 @@ def _relative_string(source, target, size=9):
 # ------------------------------------------------------------------ 仿真主体
 class Stage2Simulation:
     def __init__(self, game_map, brains, ticks=500, vision_radius=VISION_RADIUS,
-                 session_id="sim-match", stage=2, measure_time=True):
+                 session_id="sim-match", stage=2, measure_time=True, events=None):
         """brains: {seat: 带 on_perception(dict) -> dict|None 的对象}"""
         self.map = game_map
         self.ticks = int(ticks)
@@ -193,6 +197,9 @@ class Stage2Simulation:
         self.missions = missions_for(game_map)
         self.fort = None
         self.fort_buff = {seat: -1 for seat in brains}
+        # 事件注入：脚本给程序的是自然语言公告，给裁判的是结构化真值（见 contestant/events.py）
+        self.script = events
+        self.engine = EventEngine(events) if events is not None else None
         self.errors = []
         self.decision_ms = []
 
@@ -241,7 +248,7 @@ class Stage2Simulation:
             },
             "mission_text": "；".join(m["text"] for m in self.missions),
             "missions": self.missions,
-            "event_text": "",
+            "event_text": self.script.transcript(tick) if self.script is not None else "",
         }
 
     def _is_protected(self, robot, tick):
@@ -250,6 +257,10 @@ class Stage2Simulation:
     # -- 主循环 ------------------------------------------------------
     def run(self):
         for tick in range(self.ticks):
+            for robot in self.robots.values():
+                robot.forced_wait = False
+            if self.engine is not None:
+                self.engine.pre_move(self, tick)
             actions = {}
             for seat, brain in self.brains.items():
                 data = self._perception(seat, tick)
@@ -262,6 +273,8 @@ class Stage2Simulation:
                 if self.measure_time:
                     self.decision_ms.append((time.perf_counter() - started) * 1000.0)
                 actions[seat] = self._validate(seat, tick, payload)
+                if self.robots[seat].forced_wait:
+                    actions[seat] = {"action": "wait", "direction": None}
             self._settle(tick, actions)
         return self.results()
 
@@ -289,6 +302,10 @@ class Stage2Simulation:
             if direction not in DIRECTIONS:
                 robot.invalid_actions += 1
                 return action
+            if kind == "move" and self.engine is not None and self.engine.reversed(seat, tick):
+                # 规则 §8.3：幻术由裁判把 MOVE 的方向取反（ATTACK 不变）。
+                # 程序侧也做一次取反（H5），两次抵销后才是"我想去的方向"。
+                direction = OPPOSITE[direction]
             return {"action": kind, "direction": direction}
         if kind == "defend":
             if self._is_protected(robot, tick):
@@ -433,6 +450,10 @@ class Stage2Simulation:
                 robot.reached = True
             self._check_missions(robot)
 
+        if self.engine is not None:
+            self.engine.mark_vulnerable_if_moved(self, tick, list(movers))
+            self.engine.post_move(self, tick, actions)
+
         for robot in robots.values():
             if robot.alive:
                 continue
@@ -492,13 +513,23 @@ class Stage2Simulation:
                         victim = self.robots[seat2]
                         if not victim.alive or self._is_protected(victim, tick):
                             continue
-                        targets.append((seat2, float(AOE_DEFENDED if victim.defending
-                                                     else AOE_DAMAGE)))
+                        nominal_aoe = float(AOE_DEFENDED if victim.defending else AOE_DAMAGE)
+                        if self.engine is not None and self.engine.vulnerable(seat2, tick):
+                            nominal_aoe *= 2.0
+                        targets.append((seat2, nominal_aoe))
             return targets
         seat, other = near
         if self._is_protected(other, tick):
             return [(seat, 0.0)]
-        return [(seat, float(DEFENDED_DAMAGE if other.defending else ATTACK_DAMAGE))]
+        if self.engine is not None and self.engine.clean_hands_active(tick) and other.defending:
+            # §8.8：攻击防御目标 → 目标 0 伤，攻击者自受 20 反伤（反伤不吃易伤倍率）
+            robot.hp = max(0.0, robot.hp - 20)
+            self.engine.log.append((tick, "clean_hands", "seat {0} 反伤".format(robot.seat)))
+            return [(seat, 0.0)]
+        nominal = float(DEFENDED_DAMAGE if other.defending else ATTACK_DAMAGE)
+        if self.engine is not None and self.engine.vulnerable(seat, tick):
+            nominal *= 2.0                      # §8.9 潘潘的神：普通受击 20 → 40，防御 10 → 20
+        return [(seat, nominal)]
 
     def _attack_direction(self, robot):
         """攻击方向来自本 Tick 提交的动作，而不是上一 Tick 的回执。"""

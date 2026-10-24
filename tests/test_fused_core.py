@@ -108,6 +108,13 @@ class TestTactics(unittest.TestCase):
         self.assertTrue(tactics.is_war_phase(200, params.dry_ticks, params))
         self.assertTrue(tactics.is_war_phase(130, 1, params, resource_value_self=100))
 
+    def test_every_param_declares_where_it_takes_effect(self):
+        """封存答辩会被逐条问"这个参数在哪生效"：表必须覆盖全部字段。"""
+        fields = set(tactics.Params.__dataclass_fields__)
+        declared = set(tactics.PARAM_CONSUMPTION)
+        self.assertEqual(fields - declared, set(), "参数表漏了：{0}".format(fields - declared))
+        self.assertEqual(declared - fields, set(), "参数表多了：{0}".format(declared - fields))
+
     def test_contention_and_vacated_cells(self):
         moves = {"A": (1, 1), "B": (1, 1), "C": (2, 2), "D": None}
         self.assertEqual(tactics.contested_cells(moves), {(1, 1)})
