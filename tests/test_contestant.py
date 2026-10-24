@@ -369,6 +369,19 @@ class TestAgent(unittest.TestCase):
         self.assertEqual(action["direction"], "right")     # 高价值在右边 4 格
         self.assertGreaterEqual(agent.mission_moves, 1)
 
+    def test_far_mission_resource_is_not_chased(self):
+        """大地图实测：为了 5 分的任务跑半张图会把开局抢资源拖慢（首个资源 19 → 12 Tick）。"""
+        agent = Agent(AgentConfig(seat="A", stage=2, mission_max_distance=4))
+        agent.on_perception(perception(tick=0, pos=(8, 8)))          # 建立场次与地图
+        # 记忆里有一个 9 格外的 20 分值资源（视野外也能记住）
+        agent.strategy.seen_resources[(17, 8)] = 20
+        frame = perception(tick=10, pos=(8, 8), resources=(((1, 0), 10),),
+                           missions=[{"id": "collect_high_value", "type": "high_resources", "target": 1}])
+        frame["score"] = {"resource_value": 0, "mission_completed_ids": []}
+        action = agent.on_perception(frame)
+        # 高价值在 9 格外（超过门限 4），应改去右边 1 格的普通资源
+        self.assertEqual(action["direction"], "right")
+
     def test_finished_mission_does_not_hijack(self):
         agent = self.make_agent(stage=2)
         frame = perception(tick=10, pos=(8, 8), resources=(((4, 0), 20),),

@@ -53,7 +53,7 @@ class AgentConfig:
                  defended_damage=10, low_hp=30, reach_after_tick=250,
                  vision_radius=4, strategy="greedy", combat_mode="hybrid",
                  aggressive_range=4, resource_threshold=120, finish_hp=60,
-                 ai_heartbeat_tick=3, strategy_detour=0.0, mission_max_distance=0):
+                 ai_heartbeat_tick=3, strategy_detour=0.0, mission_max_distance=8):
         self.seat = seat
         self.stage = stage
         self.max_hp = max_hp
