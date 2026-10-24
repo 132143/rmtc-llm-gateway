@@ -59,7 +59,19 @@ MAP="$1"; REPS="$2"; LINEUP="$3"; A_REAL="$4"
         RMTC_SEAT=$S RMTC_TEAM_TOKEN=$TOK RMTC_AI_URL=$URL RMTC_TRACE=$TRACE \
           nohup python3 -m contestant.bot_node --seat $S --stage 2 $PROF > "$LOGF" 2>&1 &
       done
-      sleep 10
+      # 等四席都真正收到感知再开局（真机踩过"晚 join 26 Tick，开局资源被抢光"）
+      READY=0
+      for w in $(seq 1 30); do
+        READY=1
+        for S in A B C D; do
+          TF=$(printf '/tmp/trace_t_%s_%s.jsonl' "$S" "$REP")
+          [ -f "$TF" ] || READY=0
+        done
+        [ "$READY" = "1" ] && break
+        sleep 1
+      done
+      if [ "$READY" != "1" ]; then echo "有席位 30 秒内没收到感知，重跑本局"; continue; fi
+      sleep 2
 
       BODY=$(python3 -c "
 import json
