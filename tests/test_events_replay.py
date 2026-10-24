@@ -252,6 +252,97 @@ class TestObstacleMemory(unittest.TestCase):
         self.assertIn((0, -1), agent.boundary_obstacles)
 
 
+class TestMissionPortfolio(unittest.TestCase):
+    """资源任务组合约束：目标是压"丢任务"的概率，把 2 普通 + 1 高价值的缺口补齐。"""
+
+    MISSIONS = [
+        {"id": "collect_two_normal", "type": "normal_resources", "target": 2},
+        {"id": "collect_high_value", "type": "high_resources", "target": 1},
+    ]
+
+    def make_agent(self, tick=0, collected=None, portfolio=True, missions=None):
+        agent = Agent(AgentConfig(seat="A", stage=2, mission_portfolio=portfolio))
+        frame = {"tick": tick, "session_id": "m1", "vision_radius": 4,
+                 "self": {"position": [8, 8], "hp": 100, "alive": True,
+                          "protected": False, "defending": False},
+                 "visible_entities": [], "map": {"width": 24, "height": 24},
+                 "missions": missions if missions is not None else self.MISSIONS,
+                 "mission_text": "", "event_text": "",
+                 "score": {"resource_value": 0, "effective_damage": 0,
+                           "mission_completed_ids": []}}
+        agent.on_perception(frame)
+        if collected:
+            agent.collected.update(collected)
+        return agent
+
+    def frame(self, tick, resources=(), pos=(8, 8)):
+        entities = []
+        for (dx, dy), value in resources:
+            entities.append({"type": "resource_high" if value >= 20 else "resource_normal",
+                             "value": value, "position": grid_entity(dx, dy, "resource_normal")["position"]})
+        return {"tick": tick, "session_id": "m1", "vision_radius": 4,
+                "self": {"position": list(pos), "hp": 100, "alive": True,
+                         "protected": False, "defending": False},
+                "visible_entities": entities, "map": {"width": 24, "height": 24},
+                "missions": self.MISSIONS, "mission_text": "", "event_text": "",
+                "score": {"resource_value": 0, "effective_damage": 0,
+                          "mission_completed_ids": []}}
+
+    def test_counts_follow_score_delta(self):
+        agent = self.make_agent()                      # tick=0 已消费
+        agent.on_perception(dict(self.frame(1), score={"resource_value": 10,
+                                                       "mission_completed_ids": []}))
+        self.assertEqual(agent.collected["normal"], 1)
+        agent.on_perception(dict(self.frame(2), score={"resource_value": 30,
+                                                       "mission_completed_ids": []}))
+        self.assertEqual(agent.collected["high"], 1)
+        self.assertEqual(agent._last_resource_total, 30)
+
+    def test_shortfall_reads_mission_targets(self):
+        agent = self.make_agent(missions=[{"id": "collect_two_normal",
+                                           "type": "normal_resources", "target": 3}])
+        self.assertEqual(agent._mission_shortfall(), {"normal": 3})
+
+    def test_chases_missing_type_not_nearest(self):
+        # 普通已经够 2 个 → 只缺高价值：即使普通更近，也要去高价值
+        agent = self.make_agent(collected={"normal": 2, "high": 0})
+        action = agent.on_perception(self.frame(260, resources=[((1, 0), 10), ((4, 0), 20)]))
+        self.assertEqual(action["action"], "move")
+        self.assertEqual(action["direction"], "right")
+        self.assertEqual(agent.mission_portfolio_moves, 1)
+
+    def test_near_normal_beats_far_high_within_ratio(self):
+        # 两类都缺：普通距离 2、高价值距离 14（记忆里的）→ 14 > 2×2 → 先拿普通
+        agent = self.make_agent(collected={"normal": 0, "high": 0})
+        agent.last_tick = 260
+        agent.strategy.seen_resources[(20, 8)] = 20       # 高价值，距离 12
+        action = agent._mission_resource_move(self.frame(260, resources=[((2, 0), 10)]))
+        self.assertIsNotNone(action)
+        # 普通距离 2 更近：向 (10,8) 走
+        self.assertEqual(action["direction"], "right")
+        self.assertEqual(agent.mission_portfolio_moves, 1)
+
+    def test_radius_grows_only_late(self):
+        # 9×9 相对位置只能表示 ±4，视野外的东西只能来自记忆 → 用 seen_resources 注入
+        early = self.make_agent(tick=0)
+        early.strategy.seen_resources[(20, 8)] = 10        # 距 12 格
+        self.assertIsNone(early._mission_resource_move(self.frame(100)))
+        late = self.make_agent(tick=0)
+        late.last_tick = 260
+        late.strategy.seen_resources[(20, 8)] = 10
+        action = late._mission_resource_move(self.frame(260))
+        self.assertIsNotNone(action)
+        self.assertEqual(action["action"], "move")
+
+    def test_portfolio_off_keeps_legacy_behaviour(self):
+        # 关掉组合约束 = 旧的"第一个未完成资源任务"逻辑，且不记组合移动
+        agent = self.make_agent(portfolio=False, collected={"normal": 2, "high": 0})
+        self.assertTrue(hasattr(agent, "_mission_resource_move_legacy"))
+        agent.strategy.seen_resources[(20, 8)] = 10        # 距 12：旧逻辑受 8 格门限限制
+        self.assertIsNone(agent._mission_resource_move(self.frame(60)))
+        self.assertEqual(agent.mission_portfolio_moves, 0)
+
+
 class TestLlmIntent(unittest.TestCase):
     def make_agent(self, intent=None, confidence=0.9, tick=3):
         agent = Agent(AgentConfig(seat="A", stage=2, combat_mode="opportunistic"))
