@@ -39,6 +39,8 @@ class GatewayState:
         self._audit_lock = threading.Lock()
         self._stats_lock = threading.Lock()
         self._stats = {"requests": 0, "ok": 0, "rejected": 0, "upstream_errors": 0}
+        # 上游 token 用量累计：只用于本机观察花费，不是"配额查询"（协议禁止的是每席位额度查询）
+        self._tokens = {"prompt": 0, "completion": 0, "calls_with_usage": 0}
 
     def bump(self, key: str) -> None:
         with self._stats_lock:
@@ -46,7 +48,21 @@ class GatewayState:
 
     def stats(self) -> dict:
         with self._stats_lock:
-            return dict(self._stats)
+            data = dict(self._stats)
+            data["tokens"] = dict(self._tokens)
+            return data
+
+    def add_usage(self, usage: dict) -> None:
+        if not isinstance(usage, dict):
+            return
+        prompt = usage.get("prompt_tokens")
+        completion = usage.get("completion_tokens")
+        if not isinstance(prompt, int) or not isinstance(completion, int):
+            return
+        with self._stats_lock:
+            self._tokens["prompt"] += prompt
+            self._tokens["completion"] += completion
+            self._tokens["calls_with_usage"] += 1
 
     def audit(self, record: dict) -> None:
         """每请求一行 JSON。绝不写令牌原文（协议：令牌不得写入公开日志）。"""
@@ -80,6 +96,25 @@ class GatewayState:
             "stats": self.stats(),
             "uptime_s": round(time.time() - self.started_at, 1),
         }
+
+
+def _extract_usage(body: bytes) -> dict:
+    """从上游响应里取 usage（只读，不改转发内容）。取不到就返回空字典。"""
+    try:
+        payload = json.loads(body.decode("utf-8", "replace"))
+    except (UnicodeDecodeError, ValueError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    usage = payload.get("usage")
+    if not isinstance(usage, dict):
+        return {}
+    result = {"prompt_tokens": usage.get("prompt_tokens"),
+              "completion_tokens": usage.get("completion_tokens")}
+    model = payload.get("model")
+    if isinstance(model, str):
+        result["model"] = model
+    return result
 
 
 def make_handler(state: GatewayState):
@@ -168,6 +203,12 @@ def make_handler(state: GatewayState):
                 reserved = False
                 state.bump("ok")
                 record["status"] = 200
+                usage = _extract_usage(result.body)
+                if usage:
+                    state.add_usage(usage)
+                    record["model"] = usage.get("model") or record["model"]
+                    record["prompt_tokens"] = usage.get("prompt_tokens")
+                    record["completion_tokens"] = usage.get("completion_tokens")
                 self._send_bytes(200, result.body, result.content_type)
 
             except E.GatewayError as exc:

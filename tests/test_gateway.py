@@ -106,16 +106,23 @@ class GatewayCase(unittest.TestCase):
 
     @staticmethod
     def _open(request):
-        try:
-            with urllib.request.urlopen(request, timeout=10) as response:
-                raw = response.read()
-                return response.status, json.loads(raw or b"{}")
-        except urllib.error.HTTPError as exc:
-            raw = exc.read()
+        # 上一个用例的服务器线程收尾时偶尔会把新连接掐掉（Windows 上遇到过），重试一次即可
+        last_error = None
+        for _ in range(2):
             try:
-                return exc.code, json.loads(raw or b"{}")
-            except json.JSONDecodeError:
-                return exc.code, {}
+                with urllib.request.urlopen(request, timeout=10) as response:
+                    raw = response.read()
+                    return response.status, json.loads(raw or b"{}")
+            except urllib.error.HTTPError as exc:
+                raw = exc.read()
+                try:
+                    return exc.code, json.loads(raw or b"{}")
+                except json.JSONDecodeError:
+                    return exc.code, {}
+            except (urllib.error.URLError, ConnectionError) as exc:
+                last_error = exc
+                time.sleep(0.1)
+        raise last_error
 
     def raw(self, head: str, body: bytes = b"") -> tuple:
         """直接开 socket，用来构造 urllib 不肯发的畸形请求。"""
@@ -375,6 +382,23 @@ class TestUpstream(GatewayCase):
 
 
 class TestAudit(GatewayCase):
+    def test_audit_records_upstream_usage(self):
+        with FakeUpstream() as upstream:
+            path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                f"audit-usage-{os.getpid()}-{time.time_ns()}.jsonl")
+            self.addCleanup(lambda: os.path.exists(path) and os.remove(path))
+            self.start(upstream_url=upstream.url, audit_path=path)
+            self.post(self.chat())
+            for _ in range(100):
+                if os.path.exists(path) and "completion_tokens" in open(path, encoding="utf-8").read():
+                    break
+                time.sleep(0.02)
+            records = [json.loads(line) for line in open(path, encoding="utf-8") if line.strip()]
+            self.assertEqual(records[0]["prompt_tokens"], 3)
+            self.assertEqual(records[0]["completion_tokens"], 2)
+            self.assertEqual(records[0]["model"], "upstream-model")
+            self.assertEqual(self.state.stats()["tokens"]["completion"], 2)
+
     def test_audit_records_seat_but_never_token(self):
         # 用带时间戳的唯一文件名：曾经因为在全量跑时复用了同一个 audit-test.jsonl 而偶发失败
         path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
