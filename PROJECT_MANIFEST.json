@@ -1,0 +1,78 @@
+{
+  "project": "rmtc-llm-gateway",
+  "purpose": "RMTC 机甲大师图灵对决赛：参赛程序 + 本地 OpenAI 兼容网关 + 测试",
+  "version": "1.0.0",
+  "date": "2026-10-23",
+  "python_min": "3.10",
+  "dependencies": {
+    "third_party": [],
+    "ros": [
+      "rclpy",
+      "std_msgs"
+    ]
+  },
+  "entry_points": {
+    "contestant": "python3 -m contestant.bot_node --seat <A|B|C|D> --stage <1|2>",
+    "gateway": "python3 -m rmtc_gateway --port 8000 [--upstream URL --upstream-key KEY]",
+    "tests": "python run_tests.py"
+  },
+  "modules": {
+    "contestant/agent.py": "感知→动作：tick/session 去重、复活/保护、战斗判定、任务优先、LLM 效果消费",
+    "contestant/strategy.py": "BFS 贪心（记忆+绕障）与蛇形基线",
+    "contestant/decision.py": "decision_type 登记表（collect/balanced/combat）",
+    "contestant/bot_node.py": "ROS 2 节点（唯一依赖 rclpy 的一层）",
+    "contestant/sim.py": "第一阶段离线模拟器（按官方 stage1 参数）",
+    "rmtc_client/llm_client.py": "AI 客户端：4s 超时、预算(60)、抖动退避、降级",
+    "rmtc_client/event_understanding.py": "公告→结构化理解（威胁格/回血/方向反转/危险等级）",
+    "rmtc_client/json_extract.py": "JSON 提取 + 6 类修复",
+    "rmtc_gateway/": "OpenAI 兼容网关：鉴权/额度/限流/错误码/审计（协议 §5）"
+  },
+  "invariants": [
+    "动作必须回填当前感知的 tick 与 session_id",
+    "同一 Tick 不重复决策，旧帧丢弃",
+    "新 session_id 必须清空上一场状态",
+    "阵亡只能 WAIT；出生保护期不 ATTACK",
+    "第二阶段每场至少一次本场本席位真实 AI 成功调用",
+    "事件理解必须由 LLM 完成，禁止关键词/正则替代",
+    "不得写死路径、令牌、地图尺寸、场次 ID"
+  ],
+  "measured": {
+    "stage1_official_map": {
+      "score": 40,
+      "detail": "资源 200/200，9 张图均 40/40"
+    },
+    "stage2_18x18_full_pace": {
+      "hybrid": 45,
+      "opportunistic": 42,
+      "never": 30
+    },
+    "stage2_24x24_full_pace": {
+      "mission_gate_8": 52.5,
+      "mission_gate_0": 45,
+      "real_llm": 47.5
+    },
+    "ai_qualification": {
+      "mode": "real",
+      "success_count": "14/14"
+    },
+    "negative_results": [
+      "aggressive 42.5",
+      "patrol_when_idle 不提分",
+      "detour 20 -> 40.0"
+    ]
+  },
+  "tests": {
+    "command": "python run_tests.py",
+    "count": 102,
+    "suites": [
+      "gateway",
+      "client",
+      "contestant",
+      "decision"
+    ]
+  },
+  "known_gaps": [
+    "真实赛场的 24×24 地图与对手强度未验证（只能用练习裁判）",
+    "事件密集场景下没有构造出'不用 LLM 就死'的对照"
+  ]
+}

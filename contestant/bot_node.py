@@ -29,15 +29,41 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import rclpy
-from rclpy.executors import ExternalShutdownException
-from rclpy.node import Node
+try:
+    import rclpy
+    from rclpy.executors import ExternalShutdownException
+    from rclpy.node import Node
+except ImportError:                      # Windows 上通常没有 ROS 2：给出可读提示而不是堆栈
+    sys.stderr.write(
+        "这个节点需要 ROS 2（rclpy），一般只在 Ubuntu + ROS 2 Humble 上运行。\n"
+        "  · 只想验证逻辑：在任意系统跑  python run_tests.py\n"
+        "  · 想在 Windows 上跑本地网关：python -m rmtc_gateway --port 8000\n"
+        "  · 要真上场：在 Ubuntu 里 source /opt/ros/humble/setup.bash 后再运行\n")
+    raise SystemExit(3)
 from rclpy.qos import (DurabilityPolicy, HistoryPolicy, QoSProfile,
                        ReliabilityPolicy)
 from std_msgs.msg import String
 
 from contestant.agent import Agent, AgentConfig
 from contestant.decision import DECISION_TYPES, load_decision_config
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def resolve_decision_config(path):
+    """找 decision_config.json：显式路径 → 当前目录 → 仓库根目录。
+
+    不写死任何绝对路径：队友把整个仓库放到任意目录（Windows/Linux 都行）都能用。
+    """
+    if path:
+        if os.path.isabs(path) or os.path.exists(path):
+            return path
+    candidates = [path] if path else []
+    candidates += ["decision_config.json", os.path.join(REPO_ROOT, "decision_config.json")]
+    for candidate in candidates:
+        if candidate and os.path.exists(candidate):
+            return candidate
+    return path or "decision_config.json"
 from rmtc_client import ClientConfig, LlmGatewayClient
 
 
@@ -145,7 +171,8 @@ def main(argv=None):
     parser.add_argument("--dry-run", action="store_true")
     # 规则 §2.3：现场切换策略只能改 decision_config.json 里的 decision_type。
     # 下面两个参数是给"赛前练习/对照实验"用的，正式场次建议只用 --decision-config。
-    parser.add_argument("--decision-config", default="decision_config.json")
+    parser.add_argument("--decision-config", default=None,
+                        help="decision_config.json 的路径；默认从当前目录和仓库根目录自动找")
     parser.add_argument("--strategy", default=None, choices=["greedy", "snake"])
     parser.add_argument("--combat", default=None,
                         choices=["never", "opportunistic", "resource_first", "finish",
@@ -163,7 +190,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     seat = args.seat.strip().upper()[:1] or "A"
-    decision_type, note = load_decision_config(args.decision_config)
+    config_path = resolve_decision_config(args.decision_config)
+    decision_type, note = load_decision_config(config_path)
     chosen = dict(DECISION_TYPES[decision_type])
     if args.strategy:
         chosen["strategy"] = args.strategy
@@ -178,7 +206,7 @@ def main(argv=None):
     rclpy.init()
     node = RmtcBotNode(seat, args.stage, args.dry_run, agent_cfg, team_name=args.team_name)
     node.get_logger().info(
-        f"决策类型：{decision_type}（{note}）→ strategy={chosen['strategy']}, "
+        f"决策类型：{decision_type}（{note}）；配置文件 {config_path} → strategy={chosen['strategy']}, "
         f"combat={chosen['combat_mode']}；队伍名 {node.team_name}")
     try:
         rclpy.spin(node)

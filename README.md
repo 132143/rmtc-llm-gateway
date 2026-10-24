@@ -428,7 +428,16 @@ cd ~/rmtc-llm-gateway && python3 run_tests.py
 
 ---
 
-## 11. 规则怎么读、现场怎么用
+## 11. 交接与移植（给队友）
+
+| 文档 | 用途 |
+|---|---|
+| [docs/HANDOVER_FOR_TEAMMATE.md](docs/HANDOVER_FOR_TEAMMATE.md) | **给队友（和他的 LLM）**：目录分工、不能破的协议清单、已验证结论、合并规范 |
+| [docs/COMPETITION_PLAN.md](docs/COMPETITION_PLAN.md) | 封存参数表：上场到底按什么跑、三种 decision_type 怎么选、预期成绩 |
+| [docs/PORTABILITY.md](docs/PORTABILITY.md) | Windows / Ubuntu 双系统：哪些能跑、编码换行、无绝对路径自查 |
+| [PROJECT_MANIFEST.json](PROJECT_MANIFEST.json) | 机器可读清单：模块、入口、接口、测试、实测结论（给另一个 LLM 读） |
+
+## 12. 规则怎么读、现场怎么用
 
 - **规则对照与上场手册**：[docs/COMPLIANCE.md](docs/COMPLIANCE.md)
   —— 逐条对照赛事规则 v1.1 / 通信协议 v1.1，标出✅/⚠️/❌，含 LLM 接入方案与现场清单。

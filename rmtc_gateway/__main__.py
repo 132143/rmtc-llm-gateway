@@ -4,12 +4,18 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import sys
 
 from .config import Config, TokenSpec
 from .server import run
 
 
 def main(argv=None) -> int:
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     parser = argparse.ArgumentParser(
         prog="python3 -m rmtc_gateway",
         description="RMTC 统一 LLM 网关（OpenAI 兼容），协议 §5 实现。")
