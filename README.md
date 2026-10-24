@@ -199,7 +199,7 @@ hint = understanding.hint(session_id, tick)     # 拿不到就是 None，本地�
 | `RMTC_TEAM_TOKEN` | `practice-<席位>` | 本场令牌（调网关用） |
 | `RMTC_AI_URL` | `http://127.0.0.1:8080/v1/chat/completions` | 统一网关地址 |
 | `RMTC_STRATEGY` / `--strategy` | `greedy` | `greedy`（BFS 贪心）/ `snake`（原骨架，做基线对照） |
-| `RMTC_COMBAT_MODE` / `--combat` | `resource_first` | `never` / `opportunistic` / `resource_first` / `aggressive` |
+| `RMTC_COMBAT_MODE` / `--combat` | `hybrid` | `never` / `opportunistic` / `resource_first` / `finish` / `hybrid` / `aggressive`（用官方裁判实测选出的，见 §6.7） |
 | `RMTC_REACH_AFTER_TICK` / `--reach-after-tick` | `250` | 这个 Tick 之后才去任务坐标（考虑剩余时间） |
 | `RMTC_TRACE` | 空 | 决策轨迹 jsonl 路径：每 Tick 一行（位置/血量/分数/动作），复盘用 |
 
@@ -308,24 +308,29 @@ python3 -m contestant.bot_node --seat A --stage 2          # 先加 --dry-run �
 
 结论：**第一阶段已经封顶，力气应该花在第二阶段。** 地图生成见 `scripts/gen_maps.py`。
 
-### 6.7 第二阶段：四种战斗模式的对照
+### 6.7 第二阶段：战斗模式对照（官方裁判，正式节奏）
 
-裁判 API 支持 `tick_ms`/`max_ticks`/`bots`/`config`，所以能把 500 Tick × 500 ms 压成
-200 Tick × 100 ms（20 秒一局）做 A/B（`scripts/vm/stage2_ab.sh`，结果见
-[docs/STAGE2_AB.md](docs/STAGE2_AB.md)）。
+第二阶段有两种完全不同的跑法：快节奏（200 Tick × 100 ms）和正式节奏（500 Tick × 500 ms）。
+**两种结论不一样**，因为资源会在 ~52 Tick 就被四台车抢光——快节奏把"采集"和"对抗"压在同一段时间里，
+会把结论带偏。以正式节奏为准：
 
-单局已经能看出的趋势（噪声很大，对手车会挡路会打人）：
+| 模式 | 得分 | 资源 | 有效伤害 | 任务 | 说明 |
+|---|---|---|---|---|---|
+| never（只采集） | 30.0 | 60 / 200 | 0 | 3 / 3 | 资源抢完后**干等 415 Tick**，白丢对抗分 |
+| opportunistic（进射程就打） | 42.0 | 60 / 200 | 240 | 3 / 3 | 顺路打，但不主动找人 |
+| **hybrid（默认）** | **45.0** | 60 / 200 | 730（封顶 300） | 3 / 3 | 没资源可捡就转为压制对手 |
 
-| 模式 | official | open（资源集中） | big24 |
-|---|---|---|---|
-| never（只采集） | 30.0 | 35.0 | 32.5 |
-| opportunistic（进射程就打） | 35.0 | **22.5** | 36.5 |
-| aggressive（主动追人） | 42.5 | 22.5 | 32.5 |
-| resource_first（先采集再打） | 30.0 | 17.5 | **40.0** |
+分项算法：资源 60/120 → 15 分，伤害 ≥300 → 15 分，任务 3/3 → 15 分，合计 45 分上限。
 
-**要点：资源集中的图上"见人就打"是负收益**（伤害打满 320、资源只剩 10 分档位），
-所以默认改成了 `resource_first`；但 official 上 aggressive 反而最高，说明"何时开打"
-跟地图和对手有关，需要重复采样（见 docs/STAGE2_AB.md 的多次均值）。
+| 模式 | 快节奏 200×100 ms 平均（2 图 × 3 次） |
+|---|---|
+| never | 31.7 |
+| opportunistic | 27.5 |
+| finish（只补刀） | 23.8 |
+| resource_first（先采集再打） | 20.8 |
+
+**两个结论都要看**：快节奏下"只采集"最高，是因为 200 Tick 里资源还抢得到；
+正式节奏下资源必然被抢光，**干等就是白丢 15 分**，所以默认改用 `hybrid`。
 
 ## 7. 常见问题
 
