@@ -219,7 +219,7 @@
     "enabled_stages": [
       2
     ],
-    "announcement_count": 60,
+    "announcement_count": 27,
     "announcement_delay_ticks": 4,
     "max_hp": 100,
     "respawn_protection_ticks": 2,
