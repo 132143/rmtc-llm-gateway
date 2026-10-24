@@ -238,7 +238,7 @@
 
 | # | 检查 | 命令 | 通过标准 | 本次结果 |
 |---|---|---|---|---|
-| 1 | 语法（全量） | python run_tests.py | 39 个 .py 全通过 | ✅ |
+| 1 | 语法（全量） | python run_tests.py | 41 个 .py 全通过 | ✅ |
 | 2 | 单元测试 | python run_tests.py | 119 → 156 全绿 | ✅ |
 | 3 | 第一阶段回归 | python -m contestant.run_experiments --maps 60 | 官方图 40.0、60 图均值约 33.2 | ✅ 与原版一致 |
 | 4 | 真机第一阶段（虚拟机官方裁判） | run_stage1_new.sh | 40.0/40、非法动作 0 | ✅ 40.0（200/200） |
