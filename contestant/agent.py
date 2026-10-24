@@ -61,7 +61,8 @@ class AgentConfig:
                  patrol_when_idle=False, opening_mode="normal", opening_ticks=30,
                  planner="guarded", decision_type="balanced", engage_th=None,
                  pursue_r=None, ambush_on=None, param_overrides=None,
-                 memory_falsify=None, mission_portfolio=True, obstacle_ttl=40):
+                 memory_falsify=None, mission_portfolio=True, obstacle_ttl=40,
+                 high_value_scale=1.0, high_first_ticks=250):
         self.seat = seat
         self.stage = stage
         self.max_hp = max_hp
@@ -123,6 +124,10 @@ class AgentConfig:
         # 障碍记忆的过期时间。40 = 让临时墙（世界分裂 30 Tick）能自然消失；
         # 调大等于"永久记住"（原版行为），对照实验用。
         self.obstacle_ttl = int(obstacle_ttl)
+        # 前段抢稀缺资源：高价值全图只有 4 个（4 队分 → 每队期望 1 个），
+        # 一个都没拿到时把它的权重放大，并在 high_first_ticks 之前生效。
+        self.high_value_scale = float(high_value_scale)
+        self.high_first_ticks = int(high_first_ticks)
         if overrides:
             self.params = self.params.with_deltas(overrides)
 
@@ -458,7 +463,8 @@ class Agent:
         if self.strategy is not None:
             for pos, value in visible:
                 self.strategy.seen_resources[pos] = value
-            self.strategy.seen_resources.pop(tuple(self.pos), None)
+            if self.pos is not None:
+                self.strategy.seen_resources.pop(tuple(self.pos), None)
         self.resources_ever_seen += fresh
 
         score = data.get("score") if isinstance(data.get("score"), dict) else {}
@@ -883,6 +889,11 @@ class Agent:
                     set(), self.last_tick, self.cfg.vision_radius)
         # 探索偏置默认不做（实测"往最远的未探明区走"是负收益：丢任务 34%→47%、
         # 均值 −3.9、撞墙翻倍）。保留 strategy.explore_bias 开关，但默认 near = 原版行为。
+        if hasattr(self.strategy, "high_value_scale"):
+            early = self.cfg.high_first_ticks <= 0 or self.last_tick < self.cfg.high_first_ticks
+            missing_high = self.collected.get("high", 0) == 0
+            self.strategy.high_value_scale = (self.cfg.high_value_scale
+                                              if (early and missing_high) else 1.0)
         self.strategy.observe(view)
         action = self.strategy.decide(view)
         if (action.get("action") == "wait" and self.cfg.stage >= 2
@@ -962,7 +973,13 @@ class Agent:
         if high is None and normal is None:
             return None
         if high is not None and normal is not None:
+            # 容忍比（P-R-05）默认 2 倍：高价值距离不超过普通的 2 倍才优先。
+            # high_value_scale 把这条线整体放大 → "愿意为稀缺项多跑几步"。
             tolerance = max(1.0, float(self.cfg.params.high_priority))
+            if (self.cfg.high_value_scale != 1.0 and self.collected.get("high", 0) == 0
+                    and (self.cfg.high_first_ticks <= 0
+                         or self.last_tick < self.cfg.high_first_ticks)):
+                tolerance *= max(1.0, float(self.cfg.high_value_scale))
             chosen = high if high[0] <= tolerance * normal[0] else normal
         else:
             chosen = high or normal
@@ -1386,6 +1403,9 @@ class Agent:
 
     # ---------- 感知解析 ----------
     def _resources(self, data):
+        """视野内的资源。协议 §5.1 允许字段缺失，所以位置未知时直接返回空。"""
+        if self.pos is None:
+            return []
         out = []
         for entity in data.get("visible_entities") or []:
             if not isinstance(entity, dict):
@@ -1403,6 +1423,8 @@ class Agent:
         return out
 
     def _enemies(self, data):
+        if self.pos is None:
+            return []
         out = []
         for entity in data.get("visible_entities") or []:
             if not isinstance(entity, dict) or entity.get("type") != "robot":

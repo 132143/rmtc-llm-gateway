@@ -16,7 +16,7 @@ from contestant.events import Event, EventEngine, EventScript, default_script, r
 from contestant.llm_replay import (ReplayLlmClient, key_for_prompt, key_for_text,
                                    recording_plan, save_cache)
 from contestant.stage2_sim import Stage2Map, Stage2Simulation
-from rmtc_client.event_understanding import EventUnderstanding, PROMPT_TEMPLATE
+from rmtc_client.event_understanding import EventUnderstanding
 
 
 def brain(script):
