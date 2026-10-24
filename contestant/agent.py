@@ -119,6 +119,7 @@ class Agent:
         self.buff_moves = 0            # 为抢增益走了几步（复盘用）
         self.buff_attacks = 0          # 利用增益的 5×5 攻击次数
         self.reach_moves = 0           # 为完成任务点走了几步
+        self._last_defend_tick = -99   # 上次防御的 Tick（防止连续防御把自己锁死）
         self.deaths = 0                # 本场阵亡次数（复盘与实验统计用）
         self.mission_moves = 0         # 为完成任务主动走了几步（复盘用）
         self.patrol_moves = 0          # 空闲巡逻走了几步（复盘用）
@@ -321,13 +322,16 @@ class Agent:
             combat_allowed = self.cfg.combat_mode != "never"
 
         if self.cfg.stage >= 2 and self.cfg.combat_mode != "never":
-            # 保命优先：血少且敌人近，先防（这条不受任何策略影响）
+            # 保命：血少且敌人近时防御，但**最多隔一帧防一次**。
+            # 真机踩过：血量长期停在 20 时，程序连续 251 个 Tick 都在防御，
+            # 既没去任务点也没输出伤害（镜像局因此丢 5 分任务）。防御只是减伤，不是免伤。
             if hp <= self.cfg.low_hp and enemies:
                 nearest = min(abs(e[1][0] - self.pos[0]) + abs(e[1][1] - self.pos[1]) for e in enemies)
-                if nearest <= 3:
+                if nearest <= 3 and (self.last_tick - self._last_defend_tick) >= 2:
+                    self._last_defend_tick = self.last_tick
                     return {"action": "defend"}
             # 任务点优先于"追人"：实测镜像局里 reach 任务被追击挤掉，白丢 5 分
-            if reach_pending and self.last_tick >= self.cfg.reach_after_tick and hp > 40:
+            if reach_pending and self.last_tick >= self.cfg.reach_after_tick and hp > 15:
                 direction = step_toward(self.pos, reach_target,
                                         self.strategy.blocked | self.known_obstacles,
                                         self.width, self.height)

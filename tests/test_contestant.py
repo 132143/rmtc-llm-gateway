@@ -522,6 +522,18 @@ class TestAgent(unittest.TestCase):
         self.assertIn(action["direction"], ("right", "down"))
         self.assertGreaterEqual(agent.reach_moves, 1)
 
+    def test_defend_does_not_lock_the_robot(self):
+        """真机踩过：血量长期 20 时连续 251 帧都在防御，任务与伤害全丢。"""
+        agent = self.make_agent(stage=2, low_hp=30, reach_after_tick=10)
+        actions = []
+        for tick in range(6):
+            frame = perception(tick=tick, pos=(3, 3), robots=((2, 0),), hp=20,
+                               missions=[{"id": "reach_target", "type": "reach", "position": [9, 9]}])
+            actions.append(agent.on_perception(frame)["action"])
+        self.assertIn("defend", actions)
+        self.assertTrue(any(a in ("move", "attack") for a in actions),
+                        f"不能一直防御：{actions}")
+
     def test_reach_mission_defers_to_defend_when_low_hp(self):
         agent = Agent(AgentConfig(seat="A", stage=2, combat_mode="hybrid",
                                   reach_after_tick=10, low_hp=30))
