@@ -166,8 +166,13 @@ class TestAgent(unittest.TestCase):
         stuck["self"]["last_action"] = {"tick": 0, "action": "move", "moved": False,
                                         "error": "E_BLOCKED"}
         agent.on_perception(stuck)
-        self.assertIn(blocked_cell, agent.known_obstacles)
-        self.assertIn(blocked_cell, agent.strategy.blocked)
+        # E_BLOCKED 可能是别的车占位：记成"临时堵塞"（8 Tick 后过期），不是永久障碍
+        self.assertIn(blocked_cell, agent.transient_blocked)
+        self.assertIn(blocked_cell, agent._blocked_now())
+        # 过期后应当重新可以走
+        later = perception(tick=40, pos=(1, 1), resources=(((4, 0), 10),))
+        agent.on_perception(later)
+        self.assertNotIn(blocked_cell, agent._blocked_now())
 
     def test_exploration_does_not_stall_at_start(self):
         """没有资源可见时必须往外探索，不能原地 wait。"""
