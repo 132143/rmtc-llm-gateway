@@ -157,7 +157,9 @@ def main(argv=None):
     parser.add_argument("--detour", type=float,
                         default=float(os.environ.get("RMTC_DETOUR", "0")))
     parser.add_argument("--mission-max-distance", type=int,
-                        default=int(os.environ.get("RMTC_MISSION_MAX_DIST", "0")))
+                        default=int(os.environ.get("RMTC_MISSION_MAX_DIST", "8")))
+    parser.add_argument("--no-patrol", action="store_true",
+                        help="关闭空闲巡逻（对照实验用）")
     args = parser.parse_args(argv)
 
     seat = args.seat.strip().upper()[:1] or "A"
@@ -171,7 +173,8 @@ def main(argv=None):
                             strategy=chosen["strategy"], combat_mode=chosen["combat_mode"],
                             reach_after_tick=args.reach_after_tick,
                             strategy_detour=args.detour,
-                            mission_max_distance=args.mission_max_distance)
+                            mission_max_distance=args.mission_max_distance,
+                            patrol_when_idle=not args.no_patrol)
     rclpy.init()
     node = RmtcBotNode(seat, args.stage, args.dry_run, agent_cfg, team_name=args.team_name)
     node.get_logger().info(

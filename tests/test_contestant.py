@@ -439,6 +439,23 @@ class TestAgent(unittest.TestCase):
         action = agent.on_perception(perception(tick=1, pos=(8, 8)))
         self.assertEqual(action["action"], "move")
 
+    def test_patrol_when_idle_and_no_enemy(self):
+        """大地图实测 277/500 Tick 在空等；空闲时应该往巡逻点走。"""
+        agent = Agent(AgentConfig(seat="A", stage=2, combat_mode="hybrid"))
+        agent.on_perception(perception(tick=0, pos=(6, 6)))
+        agent.explored = {(x, y) for x in range(18) for y in range(18)}
+        action = agent.on_perception(perception(tick=1, pos=(6, 6)))     # 无资源、无敌人
+        self.assertEqual(action["action"], "move")
+        self.assertGreaterEqual(agent.patrol_moves, 1)
+
+    def test_patrol_can_be_disabled(self):
+        agent = Agent(AgentConfig(seat="A", stage=2, combat_mode="hybrid",
+                                  patrol_when_idle=False))
+        agent.on_perception(perception(tick=0, pos=(6, 6)))
+        agent.explored = {(x, y) for x in range(18) for y in range(18)}
+        action = agent.on_perception(perception(tick=1, pos=(6, 6)))
+        self.assertEqual(action["action"], "wait")
+
     def test_hybrid_hunts_instead_of_waiting(self):
         """真机实测：资源被对手抢完后，程序原地 wait 了 415 Tick。hybrid 应该改为去压制对手。"""
         agent = Agent(AgentConfig(seat="A", stage=2, combat_mode="hybrid"))

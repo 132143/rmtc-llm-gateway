@@ -53,7 +53,8 @@ class AgentConfig:
                  defended_damage=10, low_hp=30, reach_after_tick=250,
                  vision_radius=4, strategy="greedy", combat_mode="hybrid",
                  aggressive_range=4, resource_threshold=120, finish_hp=60,
-                 ai_heartbeat_tick=3, strategy_detour=0.0, mission_max_distance=8):
+                 ai_heartbeat_tick=3, strategy_detour=0.0, mission_max_distance=8,
+                 patrol_when_idle=True):
         self.seat = seat
         self.stage = stage
         self.max_hp = max_hp
@@ -75,6 +76,9 @@ class AgentConfig:
         # 任务资源只在这个距离内才专门去追；0 = 不限制（旧行为）。
         # 大地图上"为了 5 分的任务跑去很远"会拖慢开局抢资源（24×24 实测首个资源 26 Tick 才吃到）。
         self.mission_max_distance = mission_max_distance
+        # 闲置巡逻：资源抢完、视野里又没敌人时，向巡逻点移动而不是原地 wait。
+        # 24×24 实测有 277/500 个 Tick 在空等（占 55%）。
+        self.patrol_when_idle = patrol_when_idle
 
 
 class Agent:
@@ -103,6 +107,8 @@ class Agent:
         self.effects_applied = 0       # 按模型提示改过几次动作（复盘用）
         self._last_hp = None           # 上一帧血量（判断"要不要为躲伤害分心"）
         self.mission_moves = 0         # 为完成任务主动走了几步（复盘用）
+        self.patrol_moves = 0          # 空闲巡逻走了几步（复盘用）
+        self._patrol_index = 0         # 当前巡逻到第几个点
         self.stats = {"perceptions": 0, "actions": 0, "skipped": 0}
 
     # ---------- 日志 ----------
@@ -332,6 +338,14 @@ class Agent:
         self.strategy.observe(view)
         action = self.strategy.decide(view)
         if (action.get("action") == "wait" and self.cfg.stage >= 2
+                and self.cfg.combat_mode == "hybrid" and not enemies
+                and self.cfg.patrol_when_idle):
+            patrol = self._patrol_direction()
+            if patrol:
+                self.patrol_moves += 1
+                return self._move(patrol)
+
+        if (action.get("action") == "wait" and self.cfg.stage >= 2
                 and self.cfg.combat_mode == "hybrid" and enemies):
             # 资源已经抢完/看不见了：与其原地等到结束，不如去压制对手（可能抢到资源、也有伤害分）
             nearest = min(enemies, key=lambda e: abs(e[1][0] - self.pos[0]) + abs(e[1][1] - self.pos[1]))
@@ -404,6 +418,22 @@ class Agent:
             return None
         self.mission_moves += 1
         return self._move(direction)
+
+    def _patrol_direction(self):
+        """空闲时按巡逻点绕着走：中心 → 四个象限，走到就换下一个。"""
+        if not self.width or not self.height:
+            return None
+        cx, cy = self.width // 2, self.height // 2
+        points = [(cx, cy), (2, 2), (self.width - 3, 2),
+                  (2, self.height - 3), (self.width - 3, self.height - 3)]
+        target = points[self._patrol_index % len(points)]
+        if self.pos == target:
+            self._patrol_index += 1
+            target = points[self._patrol_index % len(points)]
+        direction = step_toward(self.pos, target,
+                                self.strategy.blocked | self.known_obstacles,
+                                self.width, self.height)
+        return direction
 
     def _avoid_cells_move(self, parsed):
         """模型给"要避开的格子"时，如果本车正好在里面，就走到最近的格子外。
