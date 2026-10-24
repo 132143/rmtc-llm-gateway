@@ -50,7 +50,7 @@ def qos_profile():
 
 
 class RmtcBotNode(Node):
-    def __init__(self, seat, stage, dry_run=False):
+    def __init__(self, seat, stage, dry_run=False, agent_cfg=None):
         super().__init__(f"rmtc_bot_{seat}")
         self.seat = seat
         self.dry_run = dry_run
@@ -63,15 +63,18 @@ class RmtcBotNode(Node):
                 token=os.environ.get("RMTC_TEAM_TOKEN", f"practice-{seat}"),
                 timeout_s=1.5, min_interval_s=2.0),
             logger=lambda level, text: self.get_logger().info(f"[ai:{level}] {text}"))
-        self.agent = Agent(AgentConfig(seat=seat, stage=stage), client=client,
+        cfg = agent_cfg or AgentConfig(seat=seat, stage=stage)
+        self.agent = Agent(cfg, client=client,
                            logger=lambda level, text: self.get_logger().info(text))
 
         qos = qos_profile()
         self.publisher = self.create_publisher(String, f"/team_{seat}/action", qos)
         self.subscription = self.create_subscription(
             String, f"/team_{seat}/perception", self.on_perception, qos)
-        self.get_logger().info(f"席位 {seat} 就绪：订阅 /team_{seat}/perception，"
-                               f"发布 /team_{seat}/action（stage {stage}）")
+        self.get_logger().info(
+            f"席位 {seat} 就绪：订阅 /team_{seat}/perception，发布 /team_{seat}/action"
+            f"（stage {stage}，策略 {self.agent.cfg.strategy}，战斗 {self.agent.cfg.combat_mode}，"
+            f"reach_after_tick {self.agent.cfg.reach_after_tick}）")
 
     def on_perception(self, msg):
         try:
@@ -99,10 +102,20 @@ def main(argv=None):
     parser.add_argument("--seat", default=os.environ.get("RMTC_SEAT", "A"))
     parser.add_argument("--stage", type=int, default=2)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--strategy", default=os.environ.get("RMTC_STRATEGY", "greedy"),
+                        choices=["greedy", "snake"])
+    parser.add_argument("--combat", default=os.environ.get("RMTC_COMBAT_MODE", "opportunistic"),
+                        choices=["never", "opportunistic", "aggressive"])
+    parser.add_argument("--reach-after-tick", type=int,
+                        default=int(os.environ.get("RMTC_REACH_AFTER_TICK", "250")))
     args = parser.parse_args(argv)
 
+    seat = args.seat.strip().upper()[:1] or "A"
+    agent_cfg = AgentConfig(seat=seat, stage=args.stage, strategy=args.strategy,
+                            combat_mode=args.combat,
+                            reach_after_tick=args.reach_after_tick)
     rclpy.init()
-    node = RmtcBotNode(args.seat.strip().upper()[:1] or "A", args.stage, args.dry_run)
+    node = RmtcBotNode(seat, args.stage, args.dry_run, agent_cfg)
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

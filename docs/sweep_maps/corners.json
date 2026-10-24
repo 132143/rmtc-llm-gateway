@@ -1,0 +1,158 @@
+{
+  "stage": 1,
+  "vision_radius": 4,
+  "respawn_wait": 3,
+  "spawn_protection": 2,
+  "mission_text": "练习采集：自主收集资源。",
+  "robots": [
+    {
+      "team": "A",
+      "spawn": [
+        1,
+        1
+      ]
+    }
+  ],
+  "missions": [],
+  "map": {
+    "width": 18,
+    "height": 18,
+    "obstacles": [],
+    "resources": [
+      {
+        "id": "corners_0",
+        "position": [
+          2,
+          2
+        ],
+        "value": 10
+      },
+      {
+        "id": "corners_1",
+        "position": [
+          3,
+          2
+        ],
+        "value": 10
+      },
+      {
+        "id": "corners_2",
+        "position": [
+          2,
+          3
+        ],
+        "value": 10
+      },
+      {
+        "id": "corners_3",
+        "position": [
+          15,
+          2
+        ],
+        "value": 10
+      },
+      {
+        "id": "corners_4",
+        "position": [
+          14,
+          2
+        ],
+        "value": 10
+      },
+      {
+        "id": "corners_5",
+        "position": [
+          15,
+          3
+        ],
+        "value": 10
+      },
+      {
+        "id": "corners_6",
+        "position": [
+          2,
+          15
+        ],
+        "value": 10
+      },
+      {
+        "id": "corners_7",
+        "position": [
+          3,
+          14
+        ],
+        "value": 10
+      },
+      {
+        "id": "corners_8",
+        "position": [
+          2,
+          14
+        ],
+        "value": 10
+      },
+      {
+        "id": "corners_9",
+        "position": [
+          15,
+          15
+        ],
+        "value": 10
+      },
+      {
+        "id": "corners_10",
+        "position": [
+          14,
+          15
+        ],
+        "value": 10
+      },
+      {
+        "id": "corners_11",
+        "position": [
+          15,
+          14
+        ],
+        "value": 10
+      },
+      {
+        "id": "corners_12",
+        "position": [
+          5,
+          5
+        ],
+        "value": 20
+      },
+      {
+        "id": "corners_13",
+        "position": [
+          12,
+          5
+        ],
+        "value": 20
+      },
+      {
+        "id": "corners_14",
+        "position": [
+          5,
+          12
+        ],
+        "value": 20
+      },
+      {
+        "id": "corners_15",
+        "position": [
+          12,
+          12
+        ],
+        "value": 20
+      }
+    ]
+  },
+  "events": {
+    "enabled": false,
+    "max_hp": 100,
+    "base_attack_damage": 20,
+    "base_defended_damage": 10
+  }
+}

@@ -34,9 +34,20 @@ def decode_relative(text):
 
 
 class AgentConfig:
+    """可调参数集中在这里，方便在官方裁判上做 A/B（见 scripts/vm/runsweep.sh）。
+
+    strategy: "greedy"（BFS 贪心，默认）/"snake"（原骨架逻辑，用来做基线对照）
+    combat_mode:
+        "never"         第二阶段也不打人（纯采集，用来验证"打人到底划不划算"）
+        "opportunistic" 只在已经进入直线 1~2 格时出手（默认）
+        "aggressive"    附近（<= aggressive_range 格）有敌人就主动靠过去
+    reach_after_tick: 这个 Tick 之后才去"到达指定坐标"的任务点
+    """
+
     def __init__(self, seat="A", stage=2, max_hp=100, attack_damage=20,
                  defended_damage=10, low_hp=30, reach_after_tick=250,
-                 vision_radius=4):
+                 vision_radius=4, strategy="greedy", combat_mode="opportunistic",
+                 aggressive_range=4):
         self.seat = seat
         self.stage = stage
         self.max_hp = max_hp
@@ -45,6 +56,9 @@ class AgentConfig:
         self.low_hp = low_hp
         self.reach_after_tick = reach_after_tick
         self.vision_radius = vision_radius
+        self.strategy = strategy
+        self.combat_mode = combat_mode
+        self.aggressive_range = aggressive_range
 
 
 class Agent:
@@ -148,7 +162,12 @@ class Agent:
         self._log("info", f"新场次 {session_id}：清空上一场的定位、记忆与在途 AI 请求")
 
     def _ensure_strategy(self):
-        if self.strategy is None and self.width and self.height:
+        if self.strategy is not None or not (self.width and self.height):
+            return
+        from contestant.strategy import SnakeStrategy
+        if self.cfg.strategy == "snake":
+            self.strategy = SnakeStrategy(self.width, self.height)
+        else:
             self.strategy = GreedyBfsStrategy(self.width, self.height, detour=0.0)
 
     # ---------- 决策 ----------
@@ -170,10 +189,12 @@ class Agent:
         hp = me.get("hp")
         hp = hp if isinstance(hp, (int, float)) else self.cfg.max_hp
 
-        if self.cfg.stage >= 2:
-            adjacent = [e for e in enemies if abs(e[1][0] - self.pos[0]) + abs(e[1][1] - self.pos[1]) <= 2]
-            if adjacent:
-                target = min(adjacent, key=lambda e: abs(e[1][0] - self.pos[0]) + abs(e[1][1] - self.pos[1]))
+        if self.cfg.stage >= 2 and self.cfg.combat_mode != "never":
+            in_range = [e for e in enemies
+                        if abs(e[1][0] - self.pos[0]) + abs(e[1][1] - self.pos[1]) <= 2]
+            if in_range:
+                target = min(in_range,
+                             key=lambda e: abs(e[1][0] - self.pos[0]) + abs(e[1][1] - self.pos[1]))
                 direction = self._line_direction(target[1])
                 if direction and not me.get("protected"):
                     return {"action": "attack", "direction": direction}   # 直线 1~2 格才打得到
@@ -181,6 +202,15 @@ class Agent:
                 nearest = min(abs(e[1][0] - self.pos[0]) + abs(e[1][1] - self.pos[1]) for e in enemies)
                 if nearest <= 3:
                     return {"action": "defend"}
+            if self.cfg.combat_mode == "aggressive" and enemies:
+                nearest = min(enemies, key=lambda e: abs(e[1][0] - self.pos[0]) + abs(e[1][1] - self.pos[1]))
+                distance = abs(nearest[1][0] - self.pos[0]) + abs(nearest[1][1] - self.pos[1])
+                if 2 < distance <= self.cfg.aggressive_range and not me.get("protected"):
+                    direction = step_toward(self.pos, nearest[1],
+                                            self.strategy.blocked | self.known_obstacles,
+                                            self.width, self.height)
+                    if direction:
+                        return self._move(direction)
 
         reach_target = self._reach_target()
         if reach_target is not None and self.cfg.stage >= 2:

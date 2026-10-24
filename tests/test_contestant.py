@@ -186,6 +186,24 @@ class TestAgent(unittest.TestCase):
         action = agent.on_perception(perception(tick=3, robots=((1, 1),)))
         self.assertNotEqual(action["action"], "attack")
 
+    def test_snake_strategy_can_be_selected(self):
+        agent = Agent(AgentConfig(seat="A", stage=1, strategy="snake"))
+        agent.on_perception(perception(tick=0, pos=(8, 8)))
+        self.assertEqual(type(agent.strategy).__name__, "SnakeStrategy")
+
+    def test_combat_never_never_attacks(self):
+        agent = Agent(AgentConfig(seat="A", stage=2, combat_mode="never"))
+        action = agent.on_perception(perception(tick=3, robots=((1, 0),)))
+        self.assertNotEqual(action["action"], "attack")
+
+    def test_aggressive_chases_enemy_at_distance(self):
+        agent = Agent(AgentConfig(seat="A", stage=2, combat_mode="aggressive",
+                                  aggressive_range=4))
+        # 敌人在 3 格外（同一行），直线攻击够不到，aggressive 应该主动靠近
+        action = agent.on_perception(perception(tick=3, pos=(8, 8), robots=((3, 0),)))
+        self.assertEqual(action["action"], "move")
+        self.assertEqual(action["direction"], "right")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
