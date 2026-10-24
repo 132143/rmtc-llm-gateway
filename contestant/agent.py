@@ -13,6 +13,10 @@
 
 from __future__ import annotations
 
+import time
+
+from contestant import tactics
+from contestant.planner import Planner, WorldView
 from contestant.strategy import GreedyBfsStrategy, step_toward
 
 DIRECTIONS = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}
@@ -54,7 +58,10 @@ class AgentConfig:
                  vision_radius=4, strategy="greedy", combat_mode="hybrid",
                  aggressive_range=4, resource_threshold=120, finish_hp=60,
                  ai_heartbeat_tick=3, strategy_detour=0.0, mission_max_distance=8,
-                 patrol_when_idle=False, opening_mode="normal", opening_ticks=30):
+                 patrol_when_idle=False, opening_mode="normal", opening_ticks=30,
+                 planner="guarded", decision_type="balanced", engage_th=None,
+                 pursue_r=None, ambush_on=None, param_overrides=None,
+                 memory_falsify=None):
         self.seat = seat
         self.stage = stage
         self.max_hp = max_hp
@@ -86,6 +93,32 @@ class AgentConfig:
         #   "high_first" 抢高地：优先视野/记忆里价值最高的资源（20 分档）
         self.opening_mode = opening_mode
         self.opening_ticks = opening_ticks
+        # 决策内核（封存默认 guarded，见 docs/FUSION_REPORT.md 的对照实验结论）：
+        #   legacy  = 原版"最近资源 + 进射程就打"（对照基线，保留用来复现 A/B）
+        #   guarded = 原版决策路径不动 + 三项已验证增量：资源记忆证伪、对抗分封顶感知、
+        #             战争期不再空等（batchB：36.60 vs 33.69，前二率 0.625 vs 0.531）
+        #   fused   = 收益表内核（tactics/planner 全量收益打分；batchB 35.29，未超过 guarded）
+        # 三者都不动 IO、调度、状态闸门这些已稳定的模块。
+        self.planner = planner
+        # decision_type 决定参数增量（02 §3），现场只能改这个字符串，不能改数字。
+        self.decision_type = decision_type
+        self.params = tactics.params_for(decision_type)
+        overrides = {}
+        if isinstance(engage_th, (int, float)):
+            overrides["engage_th"] = float(engage_th)
+        if isinstance(pursue_r, (int, float)):
+            overrides["pursue_r"] = int(pursue_r)
+        if isinstance(ambush_on, bool):
+            overrides["ambush_on"] = ambush_on
+        if isinstance(param_overrides, dict):
+            overrides.update(param_overrides)      # 对照实验用；封存版本不传这个参数
+        # 资源记忆"证伪"（看过一眼就不再追幻影）。默认跟随内核：
+        # legacy 保持原版行为（原版就是靠"记住很久以前的资源"持续移动的），fused/guarded 打开。
+        if memory_falsify is None:
+            memory_falsify = planner in ("fused", "guarded")
+        self.memory_falsify = bool(memory_falsify)
+        if overrides:
+            self.params = self.params.with_deltas(overrides)
 
 
 class Agent:
@@ -133,6 +166,17 @@ class Agent:
         self.opening_moves = 0         # 开局抢高地走了几步（实验用）
         self._patrol_index = 0         # 当前巡逻到第几个点
         self.stats = {"perceptions": 0, "actions": 0, "skipped": 0}
+        # ---- fused 内核（收益表决策）的运行状态；planner="legacy" 时全程不参与 ----
+        self._planner = None
+        self.enemy_memory = []          # [{"pos","tick","dir","entity"}] 视野外敌车用最后已知位置估值
+        self.resource_memory = {}       # 资源格 -> 最后确认 tick（记忆衰减 P-R-04）
+        self.dry_ticks = 0              # 连续多少 Tick 没有新发现资源（P-T-02）
+        self._new_resource_cells = set()
+        self.war_phase = False          # 资源见底判定（P-T-01/§9.1）
+        self.vision_seen = None         # 感知里报告的 vision_radius（协议 §4.1：0–4）
+        self.fused_actions = 0
+        self.fused_reasons = {}
+        self.plan_ms_max = 0.0
 
     # ---------- 日志 ----------
     def _log(self, level, text):
@@ -195,7 +239,11 @@ class Agent:
         if isinstance(missions, list):
             self.missions = [m for m in missions if isinstance(m, dict)]
 
+        vision = data.get("vision_radius")
+        if isinstance(vision, int) and not isinstance(vision, bool) and 0 <= vision <= 8:
+            self.vision_seen = vision          # 协议 §4.1：视野半径由感知给出，不能写死 4
         self._mark_explored()
+        self._update_memory(data, me)
         for entity in data.get("visible_entities") or []:
             if isinstance(entity, dict) and entity.get("type") == "obstacle":
                 relative = decode_relative(entity.get("position"))
@@ -254,6 +302,15 @@ class Agent:
         self.known_obstacles = set()
         self.last_move = None
         self.ai_confirmed = False
+        self._planner = None
+        self.enemy_memory = []
+        self.resource_memory = {}
+        self.dry_ticks = 0
+        self._new_resource_cells = set()
+        self.war_phase = False
+        self.vision_seen = None
+        self.fused_actions = 0
+        self.fused_reasons = {}
         if self.client is not None:
             from rmtc_client import EventUnderstanding
             self.understanding = EventUnderstanding(self.client, logger=self._logger)
@@ -268,6 +325,232 @@ class Agent:
         else:
             self.strategy = GreedyBfsStrategy(self.width, self.height,
                                               detour=self.cfg.strategy_detour)
+
+    def _damage_worth_attacking(self, data):
+        """对抗分在 D=500 封顶（§10.2），资源分在 R2=120 才封顶。
+
+        快打到 500 时，每多 20 点伤害只值 0.6 分；同一 Tick 去捡一个资源值 2.5 分。
+        所以封顶前进射程就打，快封顶时把 Tick 让给资源。原版没这层判断（一直打到 1200+ 伤害）。
+        """
+        if self.cfg.planner not in ("fused", "guarded"):
+            return True
+        score = data.get("score") if isinstance(data.get("score"), dict) else {}
+        damage = score.get("effective_damage")
+        damage = damage if isinstance(damage, (int, float)) else 0
+        return tactics.damage_headroom(damage, self.cfg.params) > 0.2
+
+    # ---------- fused 内核：记忆维护与收益表调用 ----------
+    def _update_memory(self, data, me):
+        """维护"敌车最后已知位置 / 资源最后确认 tick / 新发现计数 / 战争期判定"。
+
+        依据：03 §4.2（视野外敌车用最后已知位置估距离）、§4.3（记忆衰减）、
+              §9.1（资源见底判据只数"新发现"，不需要全图）。
+        """
+        now = self.last_tick
+        forget = self.cfg.params.enemy_mem_forget
+        pool = list(self.enemy_memory)
+        kept = []
+        for entity, pos in self._enemies(data):
+            last = entity.get("last_action") if isinstance(entity, dict) else None
+            direction = last.get("effective_direction") if isinstance(last, dict) else None
+            for index, old in enumerate(pool):
+                if abs(old["pos"][0] - pos[0]) + abs(old["pos"][1] - pos[1]) <= 2:
+                    pool.pop(index)          # 同一台车的轨迹：用最新位置覆盖旧记录
+                    break
+            kept.append({"pos": tuple(pos), "tick": now,
+                         "dir": direction if direction in DIRECTIONS else None,
+                         "entity": entity if isinstance(entity, dict) else {}})
+        for old in pool:
+            if now - int(old.get("tick", now)) <= forget:
+                kept.append(old)
+        self.enemy_memory = kept
+
+        visible = self._resources(data)
+        fresh = 0
+        for pos, _value in visible:
+            if pos not in self._new_resource_cells:
+                self._new_resource_cells.add(pos)
+                fresh += 1
+            self.resource_memory[pos] = now
+        # 判据（P-T-02 的稳健化）：视野里还有资源就说明"没见底"，不累计干旱。
+        # 原文档口径是"没有新发现的资源"，但那会把"站在同一堆资源旁边"误判成见底。
+        self.dry_ticks = 0 if (fresh or visible) else self.dry_ticks + 1
+
+        # 资源记忆的"证伪"：视野覆盖到的格子如果已经不显示资源，说明被别人拿走了。
+        # 原版只按"自己采到"删记忆，于是会一直朝一个早就不存在的资源跑（实测抢完资源后
+        # 仍在追幻影，整局因此没进入"该打人"的阶段）。规则允许用合法感知做这种推断。
+        radius = self.vision_seen if isinstance(self.vision_seen, int) else self.cfg.vision_radius
+        visible_cells = {pos for pos, _value in visible}
+        if self.cfg.memory_falsify:
+            for pos in list(self.resource_memory):
+                if pos in visible_cells:
+                    continue
+                if max(abs(pos[0] - self.pos[0]), abs(pos[1] - self.pos[1])) <= radius:
+                    self.resource_memory.pop(pos, None)
+                    if self.strategy is not None:
+                        self.strategy.seen_resources.pop(pos, None)
+
+        limit = self.cfg.params.mem_forget
+        self.resource_memory = {pos: tick for pos, tick in self.resource_memory.items()
+                                if now - tick <= limit}
+        # 记忆与策略层保持同步：决策可能由 fused 内核做出，那时代码不会再走到
+        # strategy.observe()；不同步的话，任务判断与"无资源"判断会永远看到空记忆。
+        # 注意：只在开启"证伪"时同步，否则会破坏原版路径上 strategy 自己累积的记忆
+        # （原版允许记住很久以前见过的资源，那是它"一直在动"的来源）。
+        #   · 只把本帧可见的资源补进去；删除只发生在"证伪"命中时（下面那段），
+        #     不按 resource_memory 做全量对齐——那会把策略层更早的记忆一起抹掉。
+        if self.strategy is not None:
+            for pos, value in visible:
+                self.strategy.seen_resources[pos] = value
+            self.strategy.seen_resources.pop(tuple(self.pos), None)
+        self.resources_ever_seen += fresh
+
+        score = data.get("score") if isinstance(data.get("score"), dict) else {}
+        value = score.get("resource_value")
+        value = value if isinstance(value, (int, float)) else 0
+        # 额外两个闸门，防止"探索得差"被误判成"资源见底"：
+        #   1) 本场必须真的见过资源（否则只是还没找到，不是没了）；
+        #   2) 当前视野里确实一个资源都没有。
+        self.war_phase = (tactics.is_war_phase(now, self.dry_ticks, self.cfg.params, value)
+                          and self.resources_ever_seen > 0 and not visible)
+
+    def _danger_cells(self, parsed):
+        """把模型输出的 avoid_cells 校验成合法格子集合（H1 用）。
+
+        危险等级的处理与 _avoid_cells_move 完全一致：fatal 必躲，damage 只在血少或短时危险时躲。
+        满血为躲辣椒线反复横跳会丢资源（实测 45 → 32.5），所以这层抑制是必需的。
+        """
+        if not isinstance(parsed, dict):
+            return set()
+        cells = parsed.get("avoid_cells")
+        if not isinstance(cells, list) or not cells:
+            return set()
+        until = parsed.get("avoid_until_tick")
+        if isinstance(until, (int, float)) and self.last_tick > int(until):
+            return set()
+        level = parsed.get("danger_level")
+        hp = self._last_hp
+        short = isinstance(until, (int, float)) and 0 <= int(until) - self.last_tick <= 25
+        if level != "fatal" and not (level == "damage"
+                                     and (not isinstance(hp, (int, float)) or hp <= 60 or short)):
+            return set()
+        out = set()
+        for cell in cells[:80]:
+            if not (isinstance(cell, (list, tuple)) and len(cell) == 2):
+                continue
+            try:
+                x, y = int(cell[0]), int(cell[1])
+            except (TypeError, ValueError):
+                continue
+            if 0 <= x < max(1, self.width) and 0 <= y < max(1, self.height):
+                out.add((x, y))
+        return out
+
+    def _heal_points(self, parsed):
+        """模型给出的治疗点矩形 → 一个点位（P-H）。只认矩形中心，不做语义猜测。"""
+        if not isinstance(parsed, dict):
+            return []
+        zone = parsed.get("heal_zone")
+        if not (isinstance(zone, list) and len(zone) == 2):
+            return []
+        try:
+            x1, y1 = int(zone[0][0]), int(zone[0][1])
+            x2, y2 = int(zone[1][0]), int(zone[1][1])
+        except (TypeError, ValueError, IndexError):
+            return []
+        point = ((min(x1, x2) + max(x1, x2)) // 2, (min(y1, y2) + max(y1, y2)) // 2)
+        if not (0 <= point[0] < max(1, self.width) and 0 <= point[1] < max(1, self.height)):
+            return []
+        return [(point, None)]
+
+    def _build_world(self, data, me, enemies, hp, combat_allowed):
+        """把一帧感知整理成 planner 的输入（只做整理与校验，不做决策）。"""
+        params = self.cfg.params
+        resources = []
+        if self.strategy is not None:
+            for pos, value in self.strategy.seen_resources.items():
+                pos = tuple(pos)
+                seen = int(self.resource_memory.get(pos, self.last_tick))
+                if self.last_tick - seen <= params.mem_forget:
+                    resources.append((pos, value, seen))
+        for pos, value in self._resources(data):
+            for index, (known_pos, _value, _seen) in enumerate(resources):
+                if known_pos == pos:
+                    resources[index] = (pos, value, self.last_tick)
+                    break
+            else:
+                resources.append((pos, value, self.last_tick))
+
+        score = data.get("score") if isinstance(data.get("score"), dict) else {}
+        value = score.get("resource_value")
+        damage = score.get("effective_damage")
+        completed = score.get("mission_completed_ids")
+        hint = self._hint.get("parsed") if isinstance(self._hint, dict) else None
+        danger_level = "none"
+        if isinstance(hint, dict):
+            if hint.get("no_attack_defender") is True:
+                danger_level = "self_defense"          # H4：洁身自好期间不攻打防御目标
+            elif isinstance(hint.get("danger_level"), str):
+                danger_level = hint["danger_level"]
+        return WorldView(
+            pos=self.pos, tick=self.last_tick, hp=hp,
+            width=self.width, height=self.height,
+            alive=me.get("alive") is not False, protected=me.get("protected") is True,
+            defending=me.get("defending") is True,
+            blocked=self._blocked_now(),
+            resources=resources,
+            enemies=[(entry.get("entity") or {}, entry["pos"], entry["tick"], entry.get("dir"))
+                     for entry in self.enemy_memory],
+            reach_target=self._reach_target(), reach_done=self.reach_done,
+            avoid_cells=self._danger_cells(hint), danger_level=danger_level,
+            heal_points=self._heal_points(hint),
+            fort_zone=self._buff_zone if self._buff_active() else None,
+            fort_until=self._buff_until,
+            dry_ticks=self.dry_ticks,
+            resource_value=value if isinstance(value, (int, float)) else 0,
+            damage=damage if isinstance(damage, (int, float)) else 0,
+            missions_completed=completed if isinstance(completed, list) else [],
+            combat_allowed=combat_allowed, params=params, deaths=self.deaths,
+            war_phase=self.war_phase)
+
+    def _fused_action(self, data, me, enemies, hp, combat_allowed):
+        """收益表内核。返回动作 dict，或 None（交回原路径，绝不返回非法动作）。"""
+        if self._planner is None:
+            self._planner = Planner(self.cfg.params)
+        self._planner.params = self.cfg.params
+        target = self._reach_target()
+        if target is not None and self.pos == target:
+            self.reach_done = True          # 站到任务点就算完成（规则 §10.1：到达即判定）
+        view = self._build_world(data, me, enemies, hp, combat_allowed)
+        started = time.perf_counter()
+        try:
+            intent = self._planner.plan(view)
+        except Exception as exc:                     # 规则要求：任何异常都不能让进程退出
+            self._log("error", f"决策内核异常（本 Tick 回落原路径）：{exc}")
+            self._planner = Planner(self.cfg.params)
+            return None
+        elapsed = (time.perf_counter() - started) * 1000.0
+        if elapsed > self.plan_ms_max:
+            self.plan_ms_max = elapsed
+        if not isinstance(intent, dict):
+            return None
+        action = intent.get("action")
+        reason = str(intent.get("reason") or "")
+        key = reason.split(":")[0] or "unknown"
+        self.fused_reasons[key] = self.fused_reasons.get(key, 0) + 1
+        if action == "attack":
+            direction = intent.get("direction")
+            if direction not in DIRECTIONS or me.get("protected"):
+                return None
+            self.fused_actions += 1
+            return {"action": "attack", "direction": direction}
+        if action == "move":
+            direction = intent.get("direction")
+            if direction not in DIRECTIONS:
+                return None
+            self.fused_actions += 1
+            return self._move(direction)             # H5：幻术反转只在单一移动出口做一次
+        return None
 
     # ---------- 决策 ----------
     def _decide(self, data, me):
@@ -314,7 +597,8 @@ class Agent:
         reach_pending = (reach_target is not None and not self.reach_done
                          and self.pos is not None and self.pos != reach_target)
         enemies = self._enemies(data)
-        buff_move = self._buff_camp_move(enemies, data)
+        # fused 内核自己给堡垒打分（P-F）；legacy 保留原有的"蹲堡垒"专用模块。
+        buff_move = None if self.cfg.planner == "fused" else self._buff_camp_move(enemies, data)
         if buff_move is not None:
             return buff_move
         hp = me.get("hp")
@@ -332,7 +616,10 @@ class Agent:
         else:
             combat_allowed = self.cfg.combat_mode != "never"
 
-        if self.cfg.stage >= 2 and self.cfg.combat_mode != "never":
+        # fused 内核即使 combat_mode=never 也要接管资源挑选（收益表就是这样定义的）；
+        # legacy 路径下 never 保持原状——不进入战斗分支，也就不会防御。
+        if self.cfg.stage >= 2 and (self.cfg.combat_mode != "never"
+                                    or self.cfg.planner == "fused"):
             # 保命：血少且敌人近时防御，但**最多隔一帧防一次**。
             # 真机踩过：血量长期停在 20 时，程序连续 251 个 Tick 都在防御，
             # 既没去任务点也没输出伤害（镜像局因此丢 5 分任务）。防御只是减伤，不是免伤。
@@ -371,7 +658,7 @@ class Agent:
                 if direction and self.last_tick >= self.reach_cooldown_until:
                     self.reach_moves += 1
                     return self._move(direction)
-            if combat_allowed:
+            if combat_allowed and self.cfg.combat_mode != "evaluate":
                 in_range = [e for e in enemies
                             if abs(e[1][0] - self.pos[0]) + abs(e[1][1] - self.pos[1]) <= 2]
                 if self.cfg.combat_mode == "finish":
@@ -384,8 +671,16 @@ class Agent:
                     # 规则 §6.2：最近目标是出生保护时，它挡住后面的目标且自身伤害为 0 —— 打了纯浪费 Tick。
                     protected_target = target[0].get("protected") is True
                     direction = self._line_direction(target[1])
-                    if direction and not me.get("protected") and not protected_target:
+                    if (direction and not me.get("protected") and not protected_target
+                            and self._damage_worth_attacking(data)):
                         return {"action": "attack", "direction": direction}   # 直线 1~2 格才打得到
+            if self.cfg.planner == "fused":
+                # 收益表内核：资源/任务/治疗/堡垒/战斗统一打分后取 argmax。
+                # 位置说明：排在防御（H3）、任务点（H6）、进射程就打之后——
+                # 前三条是已经用真机数据验证过的稳定模块，这里只接管"选哪个经济目标"。
+                fused = self._fused_action(data, me, enemies, hp, combat_allowed)
+                if fused is not None:
+                    return fused
             if combat_allowed and self.cfg.combat_mode == "aggressive" and enemies:
                 nearest = min(enemies, key=lambda e: abs(e[1][0] - self.pos[0]) + abs(e[1][1] - self.pos[1]))
                 distance = abs(nearest[1][0] - self.pos[0]) + abs(nearest[1][1] - self.pos[1])
@@ -416,8 +711,6 @@ class Agent:
 
         from contestant.sim import View
         resources = self._resources(data)
-        if resources:
-            self.resources_ever_seen += len(resources)
         view = View(self.pos, resources, self._blocked_now(), self.explored, set(),
                     set(), self.last_tick, self.cfg.vision_radius)
         self.strategy.observe(view)
@@ -430,6 +723,15 @@ class Agent:
                 self.patrol_moves += 1
                 return self._move(patrol)
 
+        if (action.get("action") == "wait" and self.cfg.stage >= 2
+                and self.cfg.planner == "guarded" and self.war_phase):
+            # 战争期原地 WAIT = 白扔 Tick。原版在"看不见敌人"时就是这么等的（实测最多 271/500）。
+            # 这里只加一条：没敌人就往热区走一步，其余决策完全走原路径。
+            hot = self._war_hotspot()
+            direction = step_toward(self.pos, hot, self._blocked_now(), self.width, self.height)
+            if direction:
+                self.patrol_moves += 1
+                return self._move(direction)
         if (action.get("action") == "wait" and self.cfg.stage >= 2
                 and self.cfg.combat_mode == "hybrid" and enemies):
             # 资源已经抢完/看不见了：与其原地等到结束，不如去压制对手（可能抢到资源、也有伤害分）
@@ -584,6 +886,13 @@ class Agent:
                 best = (key, (x, y))
         return best[1] if best else None
 
+    def _war_hotspot(self):
+        """战争期巡逻点：中心 + 四角内缩，按 Tick 轮换（确定性，不用随机数）。"""
+        points = ((self.width // 2, self.height // 2), (2, 2),
+                  (self.width - 3, 2), (2, self.height - 3),
+                  (self.width - 3, self.height - 3))
+        return points[(self.last_tick // 40) % len(points)]
+
     def _patrol_direction(self):
         """空闲时按巡逻点绕着走：中心 → 四个象限，走到就换下一个。"""
         if not self.width or not self.height:
@@ -721,10 +1030,63 @@ class Agent:
     _OPPOSITE = {"up": "down", "down": "up", "left": "right", "right": "left"}
 
     def _move(self, direction):
-        """记下"这一步从哪走、往哪走"，下一帧用它解释 E_BLOCKED。"""
+        """记下"这一步从哪走、往哪走"，下一帧用它解释 E_BLOCKED。
+
+        H5：幻术反转在这里做且只做一次（ATTACK 的方向不反转，所以不在动作出口统一处理）。
+        H2：融合版在这里再做一次"争格避让"——目标格若被敌车这一 Tick 占着/正在被抢，
+             规则里它们一起失败（§5.2 多人争格全部失败），所以先换成侧向的可用方向。
+        """
         direction = self._apply_reversal(direction)
+        # 争格避让只在 fused 内核里做（那里知道目标格，能保证"换方向仍在靠近目标"）。
+        # 在动作出口盲换方向实测是负收益（batchB3：39.02 < 39.97），所以 guarded 不用它。
+        if self.cfg.planner == "fused" and self.cfg.params.use_contention:
+            direction = self._contention_detour(direction)
         self.last_move = (self.pos, direction)
         return {"action": "move", "direction": direction}
+
+    def _contention_detour(self, direction):
+        """目标格被判为"这一 Tick 必被占"时改走侧向；没有更好的方向就保持原样（绝不原地卡死）。
+
+        预测来源只有两样合法信息：视野内的敌车位置 + 上一帧回执里的 effective_direction
+        （协议 §4 允许用 last_action 解释上一 Tick，也允许记忆与推断）。
+        """
+        if self.pos is None or not self.enemy_memory:
+            return direction
+        dx, dy = DIRECTIONS.get(direction, (0, 0))
+        target = (self.pos[0] + dx, self.pos[1] + dy)
+        if not self._cell_may_be_occupied(target):
+            return direction
+        alternatives = [name for name in ("up", "down", "left", "right") if name != direction]
+        # 侧向优先（保持与原方向的垂直分量），再考虑反向
+        def rank(name):
+            ndx, ndy = DIRECTIONS[name]
+            perpendicular = (ndx == 0 and dy == 0) or (ndy == 0 and dx == 0)
+            return 0 if perpendicular else 1
+        for name in sorted(alternatives, key=rank):
+            ndx, ndy = DIRECTIONS[name]
+            cell = (self.pos[0] + ndx, self.pos[1] + ndy)
+            if not (0 <= cell[0] < max(1, self.width) and 0 <= cell[1] < max(1, self.height)):
+                continue
+            if cell in self._blocked_now():
+                continue
+            if self._cell_may_be_occupied(cell):
+                continue
+            return name
+        return direction
+
+    def _cell_may_be_occupied(self, cell):
+        """这一 Tick 有没有可能被别的车占着（当前占位，或按上一帧方向推断的下一格）。"""
+        cell = tuple(cell)
+        for entry in self.enemy_memory:
+            pos = entry["pos"]
+            if pos == cell:
+                return True
+            direction = entry.get("dir")
+            if direction in DIRECTIONS:
+                ex, ey = DIRECTIONS[direction]
+                if (pos[0] + ex, pos[1] + ey) == cell:
+                    return True
+        return False
 
     def _apply_reversal(self, direction):
         hint = getattr(self, "_hint", None)
@@ -790,7 +1152,8 @@ class Agent:
         """视野窗口覆盖过的格子就是"看过"了；不然探索会退化成原地附近乱走。"""
         if self.pos is None or not self.width or not self.height:
             return
-        radius = self.cfg.vision_radius
+        # 协议 §4.1：视野半径由感知的 vision_radius 给出（0–4），配置值只做兜底。
+        radius = self.vision_seen if isinstance(self.vision_seen, int) else self.cfg.vision_radius
         for x in range(max(0, self.pos[0] - radius), min(self.width, self.pos[0] + radius + 1)):
             for y in range(max(0, self.pos[1] - radius), min(self.height, self.pos[1] + radius + 1)):
                 self.explored.add((x, y))
