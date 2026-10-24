@@ -186,3 +186,17 @@ curl -s -X POST http://127.0.0.1:8080/api/resume -H 'Content-Type: application/j
 | 旧裁判还占着 8080 | 2.5 分钟"跑完"两局 500 Tick，两行分数完全一样 | `start_referee` 先等端口真空出来；开局后校验 `finished=false && tick<5`，否则重起重来 |
 | 轮询等待写死 60 秒 | 正式节奏（250 秒/局）被截断在 tick≈120，得 25 分 | 等待上限改成 `ticks × tick_ms / 1000 + 90`；结束时再比对 `tick` 是否等于 `max_ticks`，不等就打印"被截断，结果不可信" |
 | 两个批次并发 | CSV 行错乱、出现 `None` 字段 | `flock` 锁；宿主机的 pwsh 超时**不会**杀掉虚拟机里的脚本，超时后要先 `pkill` 再重跑 |
+
+
+## 十四、第四个"假结果"陷阱：验证脚本会杀掉正在跑的实验
+
+做规则合规验证时我在 `verify_fixes.sh` 里写了 `pkill -f practice.py`——而当时后台正有一个
+2 次重复的正式节奏批次在跑。结果：
+
+- `never,rep2` 整行缺失（裁判被换掉，`/api/state` 返回空 → JSON 解析失败）；
+- `opportunistic,rep1` 记了 40.0 但 `rv=200 / damage=0 / missions=0`（对手没动 + 任务没判），
+  一眼就是异常局。
+
+**规范**：任何"真机验证"与"跑批实验"不能并行；验证脚本开头的 `pkill` 只应在确认没有批次在跑时执行。
+判断方法：先看 `ps aux | grep -E 'stage2_ab2|practice.py' | grep -v grep` 是否为空，
+再决定要不要 `pkill`。批次脚本本身有 `flock`，但 `pkill` 不受它保护。
