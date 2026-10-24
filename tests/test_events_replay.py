@@ -252,6 +252,92 @@ class TestObstacleMemory(unittest.TestCase):
         self.assertIn((0, -1), agent.boundary_obstacles)
 
 
+class TestRaceGuard(unittest.TestCase):
+    """资源争抢评估：对手更近且正朝资源去 → 放弃；对手明显更弱且够得着 → 留下阻击。
+
+    规则依据：E_BLOCKED 里包含"争格失败"，抢不过的格子不值得花 Tick；
+    而攻击只能沿四轴 1–2 格（§6.2），所以"阻击"只在够得着时才有意义。
+    """
+
+    def make_agent(self, **cfg):
+        # 这些用例专门验证机制本身，所以显式打开；默认值（关）由 test_guard_default_is_off 钉住
+        cfg.setdefault("planner", "guarded")
+        cfg.setdefault("race_guard", True)
+        agent = Agent(AgentConfig(seat="A", stage=2, **cfg))
+        agent.on_perception(frame(0, [], pos=(8, 8)))
+        return agent
+
+    def see(self, agent, tick, enemy_offsets, resources_seen, enemy_hp=100):
+        entities = [{"type": "resource_normal", "value": 10,
+                     "position": grid_entity(dx, dy)["position"]}
+                    for (dx, dy), _v in resources_seen]
+        for dx, dy in enemy_offsets:
+            entities.append({"type": "robot", "hp": enemy_hp, "protected": False,
+                             "defending": False, "position": grid_entity(dx, dy)["position"]})
+        return agent.on_perception(frame(tick, entities, pos=(8, 8)))
+
+    def test_closer_enemy_heading_to_resource_is_vetoed(self):
+        agent = self.make_agent()
+        # 资源在 (12,8)（我距 4）；敌车从 (10,8) → (11,8)，明显朝资源去（它距 1）
+        self.see(agent, 1, [(2, 0)], [((4, 0), 10)])
+        agent.strategy.seen_resources[(12, 8)] = 10
+        self.see(agent, 2, [(3, 0)], [((3, 0), 10)])
+        agent.strategy.seen_resources[(12, 8)] = 10
+        veto, stats = agent._race_veto_cells({"self": {}, "visible_entities": []})
+        self.assertIn((12, 8), veto)
+        self.assertGreaterEqual(stats["veto"], 1)
+
+    def test_enemy_moving_away_is_not_vetoed(self):
+        agent = self.make_agent()
+        self.see(agent, 1, [(3, 0)], [])
+        agent.strategy.seen_resources[(12, 8)] = 10
+        self.see(agent, 2, [(2, 0)], [])          # 向左走（远离 (12,8)）
+        agent.strategy.seen_resources[(12, 8)] = 10
+        veto, _ = agent._race_veto_cells({"self": {}, "visible_entities": []})
+        self.assertNotIn((12, 8), veto)
+
+    def test_farther_enemy_is_not_vetoed(self):
+        agent = self.make_agent()
+        # 敌车在 (8,5) → (9,5)：虽然也朝右下方的资源走，但它距资源 6 格、我只有 4 格 → 不该放弃
+        self.see(agent, 1, [(0, -3)], [])
+        agent.strategy.seen_resources[(12, 8)] = 10
+        self.see(agent, 2, [(1, -3)], [])
+        agent.strategy.seen_resources[(12, 8)] = 10
+        veto, _ = agent._race_veto_cells({"self": {}, "visible_entities": []})
+        self.assertNotIn((12, 8), veto)
+
+    def test_weak_enemy_close_by_is_exception(self):
+        agent = self.make_agent()
+        self.see(agent, 1, [(2, 0)], [], enemy_hp=20)   # 残血 + 只隔 2 格
+        agent.strategy.seen_resources[(12, 8)] = 10
+        self.see(agent, 2, [(3, 0)], [], enemy_hp=20)
+        agent.strategy.seen_resources[(12, 8)] = 10
+        veto, stats = agent._race_veto_cells({"self": {}, "visible_entities": []})
+        self.assertNotIn((12, 8), veto)
+        self.assertGreaterEqual(stats["exception"], 1)
+
+    def test_single_sighting_does_not_veto(self):
+        agent = self.make_agent()
+        self.see(agent, 1, [(3, 0)], [])
+        agent.strategy.seen_resources[(12, 8)] = 10
+        veto, _ = agent._race_veto_cells({"self": {}, "visible_entities": []})
+        self.assertNotIn((12, 8), veto)          # 只有一次观测，谈不上动向
+
+    def test_guard_default_is_off(self):
+        """实测对分数无帮助 → 默认关闭；这条用例防止有人手滑把默认值改回去。"""
+        self.assertFalse(AgentConfig().race_guard)
+
+    def test_guard_can_be_disabled(self):
+        agent = self.make_agent(race_guard=False)
+        self.see(agent, 1, [(2, 0)], [])
+        agent.strategy.seen_resources[(12, 8)] = 10
+        self.see(agent, 2, [(3, 0)], [])
+        agent.strategy.seen_resources[(12, 8)] = 10
+        veto, stats = agent._race_veto_cells({"self": {}, "visible_entities": []})
+        self.assertEqual(veto, set())
+        self.assertEqual(stats["checked"], 0)
+
+
 class TestMissionPortfolio(unittest.TestCase):
     """资源任务组合约束：目标是压"丢任务"的概率，把 2 普通 + 1 高价值的缺口补齐。"""
 

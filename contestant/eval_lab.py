@@ -70,6 +70,13 @@ GROUPS = {
     # 关掉"任务组合约束"= 旧的"第一个未完成资源任务"逻辑（用来度量丢任务概率的变化）
     "guarded_no_portfolio": {"kind": "ablation", "planner": "guarded",
                              "combat_mode": "hybrid", "mission_portfolio": False},
+    # 资源争抢评估（race guard）：关掉它 = 上一版行为
+    "guarded_no_race_guard": {"kind": "ablation", "planner": "guarded",
+                              "combat_mode": "hybrid", "race_guard": False},
+    "guarded_race_k8": {"kind": "combo", "planner": "guarded", "combat_mode": "hybrid",
+                        "race_history_ticks": 8},
+    "guarded_race_k16": {"kind": "combo", "planner": "guarded", "combat_mode": "hybrid",
+                         "race_history_ticks": 16},
     # 障碍记忆"永久记住"（原版行为）对照：验证临时墙过期是不是引入的副作用
     "guarded_ttl_forever": {"kind": "ablation", "planner": "guarded",
                             "combat_mode": "hybrid", "obstacle_ttl": 100000},
