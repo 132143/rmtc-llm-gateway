@@ -54,7 +54,7 @@ class AgentConfig:
                  vision_radius=4, strategy="greedy", combat_mode="hybrid",
                  aggressive_range=4, resource_threshold=120, finish_hp=60,
                  ai_heartbeat_tick=3, strategy_detour=0.0, mission_max_distance=8,
-                 patrol_when_idle=False):
+                 patrol_when_idle=False, opening_mode="normal", opening_ticks=30):
         self.seat = seat
         self.stage = stage
         self.max_hp = max_hp
@@ -80,6 +80,12 @@ class AgentConfig:
         # 24×24 实测：等待从 ~300 降到 ~10，但分数没升（47.5 vs 50.0），还多挨打（hp 20），
         # 因为规则里资源"收集后移除且本场不刷新"——巡逻找不到新资源，只会送人头。默认关闭。
         self.patrol_when_idle = patrol_when_idle
+        # 开局模式（前 opening_ticks 个 Tick 生效）：
+        #   "normal"    现状：任务优先（≤8 格）+ 就近贪心
+        #   "nearest"   纯就近：开局先不管任务，谁近去谁
+        #   "high_first" 抢高地：优先视野/记忆里价值最高的资源（20 分档）
+        self.opening_mode = opening_mode
+        self.opening_ticks = opening_ticks
 
 
 class Agent:
@@ -107,8 +113,11 @@ class Agent:
         self._hint = None              # 最近一次可用的模型提示（含幻术/威胁区）
         self.effects_applied = 0       # 按模型提示改过几次动作（复盘用）
         self._last_hp = None           # 上一帧血量（判断"要不要为躲伤害分心"）
+        self._last_ack = None          # 上一帧的动作回执（moved / error）
+        self.deaths = 0                # 本场阵亡次数（复盘与实验统计用）
         self.mission_moves = 0         # 为完成任务主动走了几步（复盘用）
         self.patrol_moves = 0          # 空闲巡逻走了几步（复盘用）
+        self.opening_moves = 0         # 开局抢高地走了几步（实验用）
         self._patrol_index = 0         # 当前巡逻到第几个点
         self.stats = {"perceptions": 0, "actions": 0, "skipped": 0}
 
@@ -143,7 +152,14 @@ class Agent:
         self.stats["perceptions"] += 1
 
         me = data.get("self") if isinstance(data.get("self"), dict) else {}
-        self._learn_from_last_action(me.get("last_action"))
+        last_action = me.get("last_action")
+        if isinstance(last_action, dict):
+            self._last_ack = {"moved": last_action.get("moved"),
+                              "error": last_action.get("error")}
+        if me.get("alive") is False and self.stats.get("was_alive", True):
+            self.deaths += 1                 # 从活到死的那一帧记一次
+        self.stats["was_alive"] = me.get("alive") is not False
+        self._learn_from_last_action(last_action)
         position = me.get("position")
         if isinstance(position, (list, tuple)) and len(position) == 2:
             try:
@@ -198,6 +214,8 @@ class Agent:
             "ai_confirmed": self.ai_confirmed,
             "effects": self.effects_applied,
             "mission_moves": self.mission_moves,
+            "deaths": self.deaths,
+            "ack": self._last_ack,
         }
         try:
             import json
@@ -317,9 +335,20 @@ class Agent:
                     if direction:
                         return self._move(direction)
 
-        mission_move = self._mission_resource_move(data)
-        if mission_move:
-            return mission_move
+        opening = self.last_tick < self.cfg.opening_ticks
+        if not (opening and self.cfg.opening_mode == "nearest"):
+            mission_move = self._mission_resource_move(data)
+            if mission_move:
+                return mission_move
+        if opening and self.cfg.opening_mode == "high_first":
+            target = self._best_value_target(data)
+            if target is not None:
+                direction = step_toward(self.pos, target,
+                                        self.strategy.blocked | self.known_obstacles,
+                                        self.width, self.height)
+                if direction:
+                    self.opening_moves += 1
+                    return self._move(direction)
 
         reach_target = self._reach_target()
         if reach_target is not None and self.cfg.stage >= 2:
@@ -419,6 +448,23 @@ class Agent:
             return None
         self.mission_moves += 1
         return self._move(direction)
+
+    def _best_value_target(self, data, max_distance=8):
+        """开局抢高地：视野 + 记忆里，选价值最高的资源（同价值取最近的）。"""
+        if self.pos is None:
+            return None
+        seen = dict(self.strategy.seen_resources) if self.strategy else {}
+        for pos, value in self._resources(data):
+            seen[pos] = value
+        best = None
+        for (x, y), value in seen.items():
+            distance = abs(x - self.pos[0]) + abs(y - self.pos[1])
+            if distance == 0 or distance > max_distance:
+                continue
+            key = (-value, distance)
+            if best is None or key < best[0]:
+                best = (key, (x, y))
+        return best[1] if best else None
 
     def _patrol_direction(self):
         """空闲时按巡逻点绕着走：中心 → 四个象限，走到就换下一个。"""

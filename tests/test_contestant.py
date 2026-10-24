@@ -439,6 +439,25 @@ class TestAgent(unittest.TestCase):
         action = agent.on_perception(perception(tick=1, pos=(8, 8)))
         self.assertEqual(action["action"], "move")
 
+    def test_opening_high_first_prefers_value(self):
+        """开局抢高地：视野里 20 分资源比更近的 10 分资源优先。"""
+        agent = Agent(AgentConfig(seat="A", stage=2, combat_mode="hybrid",
+                                  opening_mode="high_first", opening_ticks=30))
+        frame = perception(tick=2, pos=(8, 8), resources=(((1, 0), 10), ((0, 4), 20)))
+        action = agent.on_perception(frame)
+        self.assertEqual(action["direction"], "down")     # 20 分在下 4 格
+
+    def test_opening_nearest_skips_mission(self):
+        agent = Agent(AgentConfig(seat="A", stage=2, combat_mode="hybrid",
+                                  opening_mode="nearest", opening_ticks=30))
+        agent.on_perception(perception(tick=0, pos=(8, 8)))
+        agent.strategy.seen_resources[(17, 8)] = 20       # 远处高价值任务资源
+        frame = perception(tick=2, pos=(8, 8), resources=(((1, 0), 10),),
+                           missions=[{"id": "collect_high_value", "type": "high_resources", "target": 1}])
+        frame["score"] = {"resource_value": 0, "mission_completed_ids": []}
+        action = agent.on_perception(frame)
+        self.assertEqual(action["direction"], "right")    # 就近
+
     def test_patrol_is_off_by_default(self):
         """负结果也要固定下来：巡逻实测不提分，默认关。"""
         agent = Agent(AgentConfig(seat="A", stage=2, combat_mode="hybrid"))

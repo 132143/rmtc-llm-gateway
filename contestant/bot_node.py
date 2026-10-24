@@ -187,6 +187,11 @@ def main(argv=None):
                         default=int(os.environ.get("RMTC_MISSION_MAX_DIST", "8")))
     parser.add_argument("--no-patrol", action="store_true",
                         help="关闭空闲巡逻（对照实验用）")
+    parser.add_argument("--opening-mode", default=os.environ.get("RMTC_OPENING_MODE", "normal"),
+                        choices=["normal", "nearest", "high_first"],
+                        help="开局微策略（实验用）")
+    parser.add_argument("--opening-ticks", type=int,
+                        default=int(os.environ.get("RMTC_OPENING_TICKS", "30")))
     args = parser.parse_args(argv)
 
     seat = args.seat.strip().upper()[:1] or "A"
@@ -202,7 +207,9 @@ def main(argv=None):
                             reach_after_tick=args.reach_after_tick,
                             strategy_detour=args.detour,
                             mission_max_distance=args.mission_max_distance,
-                            patrol_when_idle=not args.no_patrol)
+                            patrol_when_idle=not args.no_patrol,
+                            opening_mode=args.opening_mode,
+                            opening_ticks=args.opening_ticks)
     rclpy.init()
     node = RmtcBotNode(seat, args.stage, args.dry_run, agent_cfg, team_name=args.team_name)
     node.get_logger().info(
