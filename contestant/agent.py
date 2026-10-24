@@ -575,7 +575,10 @@ class Agent:
                 # 没有事件也要问一次：否则本场可能一次成功调用都没有 → 任务分直接 0。
                 self.understanding.offer(
                     self.session_id, self.last_tick,
-                    "（本场暂无事件公告）请说明：在资源争夺中，采集与对抗应该如何取舍。",
+                    # 这段文案必须含 "json"：真机实测 DeepSeek 在 response_format=json_object
+                    # 下要求 prompt 里出现该词，否则 400 —— 那会把 AI 资格（15 分）直接打掉。
+                    "（本场暂无事件公告）请用一个严格 JSON 对象回答："
+                    "在资源争夺中，采集与对抗应该如何取舍。",
                     mission_text=mission_text if isinstance(mission_text, str) else "",
                     position=self.pos, map_size=(self.width, self.height), seat=self.cfg.seat,
                     event_key="__heartbeat__")

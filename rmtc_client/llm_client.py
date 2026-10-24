@@ -94,6 +94,7 @@ class LlmGatewayClient:
         self._in_flight = 0            # 已放行、还没回来的请求
         self._spent = 0                 # 已占用的额度（按发出的请求计，超时也算）
         self._last_code = ""
+        self._json_mode_off = False     # 网关不接受 response_format 时置位（见 _on_http_error）
 
     # ---------- 对外状态 ----------
     @property
@@ -163,7 +164,11 @@ class LlmGatewayClient:
             return LlmResult(ok=False, code="local_skipped", message=f"skip: {reason}")
 
         try:
-            return self._ask_once(prompt, messages, timeout_s, max_tokens)
+            result = self._ask_once(prompt, messages, timeout_s, max_tokens)
+            if result.code == "json_mode_rejected":
+                # 已经关掉 response_format，立刻重试一次（不再占预算名额之外的名额）
+                result = self._ask_once(prompt, messages, timeout_s, max_tokens)
+            return result
         finally:
             self._release()
 
@@ -172,9 +177,11 @@ class LlmGatewayClient:
             "messages": messages or [{"role": "user", "content": prompt}],
             "max_tokens": max_tokens if max_tokens is not None else self.cfg.max_tokens,
         }
-        if self.cfg.json_mode:
+        if self.cfg.json_mode and not self._json_mode_off:
             # OpenAI 兼容的 JSON 模式：要求模型只输出 JSON 对象（DeepSeek 支持）。
             # 只是"约束输出格式"，不改变规则要求的事件理解仍由模型完成。
+            # 真机踩坑：DeepSeek 对 json_object 要求 prompt 里出现 "json"，否则 400；
+            # 网关/模型换代也可能直接不支持这个字段 —— 一旦被拒就本场关掉它（见 _on_http_error）。
             payload["response_format"] = {"type": "json_object"}
         if self.cfg.model:
             payload["model"] = self.cfg.model
@@ -238,6 +245,16 @@ class LlmGatewayClient:
         except Exception:
             pass
         code = code or f"http_{exc.code}"
+        # 只针对"这个网关不接受 response_format=json_object"的一种 400：关掉该字段后重试一次。
+        # 为什么值得为此多花 1 次配额：AI 资格=任务分 15 分，一次格式被拒不能连带整场归零。
+        lowered = message.lower()
+        if (not self._json_mode_off and exc.code == 400
+                and "json_object" in lowered + str(code) and "response_format" in lowered):
+            with self._lock:
+                self._json_mode_off = True
+                self._last_code = "json_mode_rejected"
+            self._log("warn", f"网关拒绝 json_object 输出模式（{message[:80]}），本场改用普通输出")
+            return self._fail("json_mode_rejected", exc.code, message, started)
         if code in _FATAL_CODES:
             with self._lock:
                 self._degraded = code
