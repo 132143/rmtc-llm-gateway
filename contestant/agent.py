@@ -62,7 +62,8 @@ class AgentConfig:
                  planner="guarded", decision_type="balanced", engage_th=None,
                  pursue_r=None, ambush_on=None, param_overrides=None,
                  memory_falsify=None, mission_portfolio=True, obstacle_ttl=40,
-                 high_value_scale=1.0, high_first_ticks=250):
+                 high_value_scale=1.0, high_first_ticks=250, race_guard=False,
+                 race_history_ticks=12, race_weak_hp=40, race_weak_ratio=0.6):
         self.seat = seat
         self.stage = stage
         self.max_hp = max_hp
@@ -128,6 +129,14 @@ class AgentConfig:
         # 一个都没拿到时把它的权重放大，并在 high_first_ticks 之前生效。
         self.high_value_scale = float(high_value_scale)
         self.high_first_ticks = int(high_first_ticks)
+        # 资源争抢评估（race guard）：视野内敌车更近、且最近几片确实朝那个资源移动 → 放弃它，
+        # 把 Tick 用在别处；但若对手明显更弱且我们够得着，就不放弃（可以顺手阻击，不追）。
+        # ⚠️ 默认关闭：96 局/组实测"每局放弃 4.5 个格"，但均值 40.03 vs 40.05、最低分相同、
+        #    资源/死亡/撞墙全在噪声内 → 不采纳为默认，保留开关供更强对手环境再验。
+        self.race_guard = bool(race_guard)
+        self.race_history_ticks = int(race_history_ticks)   # 用多少片内的动向作证据
+        self.race_weak_hp = float(race_weak_hp)             # 低于这个血量算"明显更弱"
+        self.race_weak_ratio = float(race_weak_ratio)       # 或低于我方血量的这个比例
         if overrides:
             self.params = self.params.with_deltas(overrides)
 
@@ -340,6 +349,8 @@ class Agent:
         self._last_resource_total = 0
         self._completed_ids = set()
         self.mission_portfolio_moves = 0
+        self._race_veto = set()
+        self.race_stats = {"checked": 0, "veto": 0, "exception": 0}
         self.llm_intent = "none"
         self.llm_intent_until = -1
         self.llm_intent_log = []
@@ -410,12 +421,16 @@ class Agent:
         for entity, pos in self._enemies(data):
             last = entity.get("last_action") if isinstance(entity, dict) else None
             direction = last.get("effective_direction") if isinstance(last, dict) else None
+            history = []
             for index, old in enumerate(pool):
                 if abs(old["pos"][0] - pos[0]) + abs(old["pos"][1] - pos[1]) <= 2:
+                    history = list(old.get("history") or [])[-7:]
                     pool.pop(index)          # 同一台车的轨迹：用最新位置覆盖旧记录
                     break
+            history.append((now, tuple(pos)))
             kept.append({"pos": tuple(pos), "tick": now,
                          "dir": direction if direction in DIRECTIONS else None,
+                         "history": history,
                          "entity": entity if isinstance(entity, dict) else {}})
         for old in pool:
             if now - int(old.get("tick", now)) <= forget:
@@ -507,6 +522,77 @@ class Agent:
 
     def _llm_intent_active(self, intent):
         return self.llm_intent == intent and self.last_tick <= self.llm_intent_until
+
+    # ---------- 资源争抢评估（race guard）----------
+    def _race_veto_cells(self, data):
+        """算出"这一 Tick 不值得去抢"的资源格。
+
+        判据（三条同时成立才算争不过）：
+          1. 视野/记忆里的敌车到该资源比我更近（含 1 格余量）；
+          2. 它最近 race_history_ticks 片内的实际位移确实朝向该资源（点积为正）；
+          3. 不属于例外：对手明显更弱且我已经够得着（≤3 格）——那种情况留下，可以顺手阻击。
+        返回 (要放弃的格子集合, 统计)。只影响"挑目标"，不产生任何动作。
+        """
+        veto, stats = set(), {"checked": 0, "veto": 0, "exception": 0}
+        if not self.cfg.race_guard or self.pos is None:
+            return veto, stats
+        candidates = set()
+        for pos, _value in self._resources(data):
+            candidates.add(tuple(pos))
+        for pos in self.strategy.seen_resources if self.strategy is not None else ():
+            candidates.add(tuple(pos))
+        if not candidates:
+            return veto, stats
+        now = self.last_tick
+        hp_mine = self._last_hp if isinstance(self._last_hp, (int, float)) else self.cfg.max_hp
+        for cell in candidates:
+            stats["checked"] += 1
+            mine = abs(cell[0] - self.pos[0]) + abs(cell[1] - self.pos[1])
+            if mine == 0:
+                continue
+            for entry in self.enemy_memory:
+                if now - int(entry.get("tick", now)) > self.cfg.race_history_ticks:
+                    continue                       # 太旧的动向不作为证据
+                epos = entry["pos"]
+                distance = abs(cell[0] - epos[0]) + abs(cell[1] - epos[1])
+                if distance > mine - 1:
+                    continue                       # 只有"确实更近（至少近 1 格）"才算争不过
+                history = entry.get("history") or []
+                if len(history) < 2:
+                    continue                       # 只见过一次，谈不上"动向"
+                (t0, p0), (t1, p1) = history[0], history[-1]
+                if t1 <= t0:
+                    continue
+                vx, vy = p1[0] - p0[0], p1[1] - p0[1]
+                if vx == 0 and vy == 0:
+                    continue                       # 没动过：可能在防守/卡住，不据此放弃
+                if vx * (cell[0] - p1[0]) + vy * (cell[1] - p1[1]) <= 0:
+                    continue                       # 位移不朝这个资源
+                if self._race_exception(entry, epos, hp_mine):
+                    stats["exception"] += 1
+                    continue
+                veto.add(cell)
+                stats["veto"] += 1
+                break
+        return veto, stats
+
+    def _race_exception(self, entry, epos, hp_mine):
+        """例外：对手明显更弱、而且我已经离它很近（不会陷入追击）→ 不放弃，留下来打。
+
+        规则依据：攻击只能沿四轴 1–2 格（§6.2），所以"阻击"只在自己够得着时才有意义；
+        距离 >3 的"阻击"就是追击，实测无效（500 片只打出 22 点伤害）。
+        """
+        entity = entry.get("entity") or {}
+        if entity.get("protected") is True:
+            return False
+        hp_enemy = entity.get("hp")
+        if not isinstance(hp_enemy, (int, float)):
+            return False
+        weak = (hp_enemy <= self.cfg.race_weak_hp
+                or hp_enemy <= float(hp_mine) * self.cfg.race_weak_ratio)
+        if not weak:
+            return False
+        return abs(epos[0] - self.pos[0]) + abs(epos[1] - self.pos[1]) <= 3
 
     def _update_collected(self, score, resource_value):
         """统计本场已收集的普通/高价值资源个数（任务组合约束要用）。
@@ -889,6 +975,12 @@ class Agent:
                     set(), self.last_tick, self.cfg.vision_radius)
         # 探索偏置默认不做（实测"往最远的未探明区走"是负收益：丢任务 34%→47%、
         # 均值 −3.9、撞墙翻倍）。保留 strategy.explore_bias 开关，但默认 near = 原版行为。
+        # 资源争抢评估：先算"哪些格不值得去抢"，再交给策略层过滤（不改任何动作格式）
+        self._race_veto, race_stats = self._race_veto_cells(data)
+        for key, value in race_stats.items():
+            self.race_stats[key] = self.race_stats.get(key, 0) + value
+        if hasattr(self.strategy, "race_veto"):
+            self.strategy.race_veto = self._race_veto
         if hasattr(self.strategy, "high_value_scale"):
             early = self.cfg.high_first_ticks <= 0 or self.last_tick < self.cfg.high_first_ticks
             missing_high = self.collected.get("high", 0) == 0
@@ -964,6 +1056,8 @@ class Agent:
             bucket = "high" if value >= 20 else "normal"
             if bucket not in short:
                 continue
+            if (x, y) in self._race_veto:
+                continue                        # 争不过（对手更近且正朝它去）→ 放弃，省 Tick
             distance = abs(x - self.pos[0]) + abs(y - self.pos[1])
             if distance == 0 or distance > radius.get(bucket, 0):
                 continue

@@ -115,6 +115,8 @@ class GreedyBfsStrategy(BaseStrategy):
         # 数学含义：value×scale/(dist+detour)，scale=2 时"20 分资源只要不超过普通资源
         # 距离的 4 倍"就会胜出（默认 2 倍）。由 agent 按"还缺高价值"动态设置。
         self.high_value_scale = float(high_value_scale)
+        # 这一 Tick 不值得去抢的资源格（由 agent 的资源争抢评估算出）；空集 = 不过滤
+        self.race_veto = set()
         # 探索偏置：near = 最近的未探明格（原版）；far = 最远的未探明格。
         # 用途只在"任务缺稀缺资源、需要更快铺开视野"时临时切到 far。
         self.explore_bias = explore_bias
@@ -123,6 +125,11 @@ class GreedyBfsStrategy(BaseStrategy):
         targets = dict(self.seen_resources)
         for pos, value in view.visible_resources:
             targets[pos] = value
+        veto = getattr(self, "race_veto", None)
+        if veto:
+            filtered = {pos: value for pos, value in targets.items() if tuple(pos) not in veto}
+            if filtered:              # 全被放弃时保留原集合，避免因为过滤而原地不动
+                targets = filtered
         if targets:
             scale = self.high_value_scale
 
