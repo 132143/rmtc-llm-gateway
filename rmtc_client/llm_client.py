@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import random
 import threading
 import time
 import urllib.error
@@ -36,6 +37,7 @@ class ClientConfig:
     backoff_s: float = 1.0
     model: str = ""
     max_tokens: int = 200
+    json_mode: bool = True        # 让模型只输出 JSON（减少解析失败）
 
 
 @dataclass
@@ -149,6 +151,10 @@ class LlmGatewayClient:
             "messages": messages or [{"role": "user", "content": prompt}],
             "max_tokens": max_tokens if max_tokens is not None else self.cfg.max_tokens,
         }
+        if self.cfg.json_mode:
+            # OpenAI 兼容的 JSON 模式：要求模型只输出 JSON 对象（DeepSeek 支持）。
+            # 只是"约束输出格式"，不改变规则要求的事件理解仍由模型完成。
+            payload["response_format"] = {"type": "json_object"}
         if self.cfg.model:
             payload["model"] = self.cfg.model
 
@@ -217,8 +223,10 @@ class LlmGatewayClient:
                 self._last_code = code
             self._log("error", f"网关返回 {code}，本地 AI 通道已停用（继续用本地策略）")
         elif code in _BACKOFF_CODES:
+            # 抖动退避（思路同 tenacity）：多队伍共享网关时，固定退避会撞车
+            delay = self.cfg.backoff_s * (1 + random.random() * 0.5)
             with self._lock:
-                self._next_allowed = time.monotonic() + self.cfg.backoff_s
+                self._next_allowed = time.monotonic() + delay
                 self._last_code = code
         else:
             with self._lock:

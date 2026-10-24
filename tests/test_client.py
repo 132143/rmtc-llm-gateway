@@ -97,6 +97,7 @@ class TestClientCalls(unittest.TestCase):
             self.assertNotIn("stream", request["body"])
             self.assertEqual(request["body"]["max_tokens"], 128)
             self.assertEqual(request["body"]["messages"][0]["role"], "user")
+            self.assertEqual(request["body"]["response_format"], {"type": "json_object"})
 
     def test_timeout_is_a_value_not_an_exception(self):
         with FakeGateway([{"status": 200, "payload": completion("慢"), "delay": 0.5}]) as gateway:
@@ -228,6 +229,32 @@ class TestEventUnderstanding(unittest.TestCase):
                 return hint
             time.sleep(0.02)
         return None
+
+
+class TestJsonRepair(unittest.TestCase):
+    """借 outputguard 的修复策略：模型吐坏 JSON 时还能救回来。"""
+
+    def test_single_quotes(self):
+        self.assertEqual(extract_first_json_object("{'a': 1}"), {"a": 1})
+
+    def test_trailing_comma(self):
+        self.assertEqual(extract_first_json_object('{"a": 1, "b": [1, 2,],}'), {"a": 1, "b": [1, 2]})
+
+    def test_comments(self):
+        text = '{"a": 1, // 注释\n "b": 2 /* 块注释 */}'
+        self.assertEqual(extract_first_json_object(text), {"a": 1, "b": 2})
+
+    def test_python_literals(self):
+        self.assertEqual(extract_first_json_object('{"a": True, "b": None}'), {"a": True, "b": None})
+
+    def test_truncated_is_repaired(self):
+        # 模型被 max_tokens 截断
+        self.assertEqual(extract_first_json_object('{"threat_zone": [[8,3],[12,7]], "direction_reversed": true'),
+                         {"threat_zone": [[8, 3], [12, 7]], "direction_reversed": True})
+
+    def test_garbage_returns_none(self):
+        self.assertIsNone(extract_first_json_object("我无法判断"))
+        self.assertIsNone(extract_first_json_object("{a: b: c}"))
 
 
 class TestJsonExtract(unittest.TestCase):
