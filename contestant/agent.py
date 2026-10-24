@@ -53,7 +53,7 @@ class AgentConfig:
                  defended_damage=10, low_hp=30, reach_after_tick=250,
                  vision_radius=4, strategy="greedy", combat_mode="hybrid",
                  aggressive_range=4, resource_threshold=120, finish_hp=60,
-                 ai_heartbeat_tick=3):
+                 ai_heartbeat_tick=3, strategy_detour=0.0):
         self.seat = seat
         self.stage = stage
         self.max_hp = max_hp
@@ -70,6 +70,8 @@ class AgentConfig:
         # 规则 §10.2：第二阶段每场必须有本场本席位至少一次"真实统一 AI 成功调用"，否则任务分 M=0。
         # 所以不能"等有事件再问"——开局就发一次心跳请求，确保本场有成功记录。
         self.ai_heartbeat_tick = ai_heartbeat_tick
+        # 资源取舍：priority = 价值 / (距离 + detour)。0 = 谁近去谁；大 = 谁值钱去谁。
+        self.strategy_detour = strategy_detour
 
 
 class Agent:
@@ -211,7 +213,8 @@ class Agent:
         if self.cfg.strategy == "snake":
             self.strategy = SnakeStrategy(self.width, self.height)
         else:
-            self.strategy = GreedyBfsStrategy(self.width, self.height, detour=0.0)
+            self.strategy = GreedyBfsStrategy(self.width, self.height,
+                                              detour=self.cfg.strategy_detour)
 
     # ---------- 决策 ----------
     def _decide(self, data, me):

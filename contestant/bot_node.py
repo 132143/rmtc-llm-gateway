@@ -153,6 +153,9 @@ def main(argv=None):
     parser.add_argument("--reach-after-tick", type=int,
                         default=int(os.environ.get("RMTC_REACH_AFTER_TICK", "250")))
     parser.add_argument("--team-name", default=os.environ.get("RMTC_TEAM_NAME"))
+    # 赛前调参用（封存后这些值固定；现场只允许改 decision_config.json）
+    parser.add_argument("--detour", type=float,
+                        default=float(os.environ.get("RMTC_DETOUR", "0")))
     args = parser.parse_args(argv)
 
     seat = args.seat.strip().upper()[:1] or "A"
@@ -164,7 +167,8 @@ def main(argv=None):
         chosen["combat_mode"] = args.combat
     agent_cfg = AgentConfig(seat=seat, stage=args.stage,
                             strategy=chosen["strategy"], combat_mode=chosen["combat_mode"],
-                            reach_after_tick=args.reach_after_tick)
+                            reach_after_tick=args.reach_after_tick,
+                            strategy_detour=args.detour)
     rclpy.init()
     node = RmtcBotNode(seat, args.stage, args.dry_run, agent_cfg, team_name=args.team_name)
     node.get_logger().info(
