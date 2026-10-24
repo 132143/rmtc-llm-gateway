@@ -159,6 +159,24 @@ class TestClientCalls(unittest.TestCase):
             self.assertFalse(result.ok)
             self.assertEqual(result.code, "bad_response")
 
+    def test_budget_counts_in_flight_requests(self):
+        """真机踩到的坑：预算 60 却打了 63 次 —— 多线程同时通过检查。现在在途也占预算。"""
+        import threading
+        with FakeGateway([{"status": 200, "payload": completion("慢"), "delay": 0.2} for _ in range(6)]) as gateway:
+            client = make_client(gateway.url, max_calls=2, timeout_s=2.0)
+            results = []
+
+            def worker():
+                results.append(client.ask("并发"))
+
+            threads = [threading.Thread(target=worker) for _ in range(6)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(5)
+            self.assertLessEqual(len(gateway.requests), 2, "并发下请求数不能超过预算")
+            self.assertLessEqual(client.ok_calls, 2)
+
     def test_unreachable_gateway_is_handled(self):
         client = make_client("http://127.0.0.1:1/v1/chat/completions", timeout_s=0.5)
         result = client.ask("你好")

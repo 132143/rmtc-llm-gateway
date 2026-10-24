@@ -89,6 +89,7 @@ class LlmGatewayClient:
         self._next_allowed = 0.0
         self._attempts = 0
         self._ok_calls = 0
+        self._in_flight = 0            # 已放行、还没回来的请求（算进预算，避免超额）
         self._last_code = ""
 
     # ---------- 对外状态 ----------
@@ -115,6 +116,7 @@ class LlmGatewayClient:
     def stats(self) -> dict:
         with self._lock:
             return {"attempts": self._attempts, "ok_calls": self._ok_calls,
+                    "in_flight": self._in_flight,
                     "degraded": self._degraded, "last_code": self._last_code}
 
     def _log(self, level: str, text: str) -> None:
@@ -125,28 +127,41 @@ class LlmGatewayClient:
                 pass
 
     # ---------- 何时可以调用 ----------
-    def _allow(self) -> tuple[bool, str]:
+    def _reserve(self) -> tuple[bool, str]:
+        """准入 + 占位。
+
+        规则 §11.3：额度按成功调用累计，超额没有补回。所以预算必须把**在途请求**也算进去，
+        否则两个线程同时通过检查就会超额（真机实测过：预算 60 却打了 63 次）。
+        """
         with self._lock:
             if self._degraded:
                 return False, self._degraded
-            if self.cfg.max_calls and self._ok_calls >= self.cfg.max_calls:
+            if self.cfg.max_calls and (self._ok_calls + self._in_flight) >= self.cfg.max_calls:
                 return False, "budget"
             if time.monotonic() < self._next_allowed:
                 return False, "cooldown"
+            self._in_flight += 1
+            self._next_allowed = time.monotonic() + self.cfg.min_interval_s
+            self._attempts += 1
             return True, ""
+
+    def _release(self) -> None:
+        with self._lock:
+            self._in_flight = max(0, self._in_flight - 1)
 
     # ---------- 主调用 ----------
     def ask(self, prompt: str, messages: list | None = None,
             timeout_s: float | None = None, max_tokens: int | None = None) -> LlmResult:
-        allowed, reason = self._allow()
+        allowed, reason = self._reserve()
         if not allowed:
             return LlmResult(ok=False, code="local_skipped", message=f"skip: {reason}")
 
-        with self._lock:
-            # 立刻占住冷却位，避免同 Tick 里多个线程一起打网关
-            self._next_allowed = time.monotonic() + self.cfg.min_interval_s
-            self._attempts += 1
+        try:
+            return self._ask_once(prompt, messages, timeout_s, max_tokens)
+        finally:
+            self._release()
 
+    def _ask_once(self, prompt, messages, timeout_s, max_tokens) -> LlmResult:
         payload = {
             "messages": messages or [{"role": "user", "content": prompt}],
             "max_tokens": max_tokens if max_tokens is not None else self.cfg.max_tokens,
