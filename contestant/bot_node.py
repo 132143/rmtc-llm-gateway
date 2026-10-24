@@ -65,7 +65,8 @@ class RmtcBotNode(Node):
             logger=lambda level, text: self.get_logger().info(f"[ai:{level}] {text}"))
         cfg = agent_cfg or AgentConfig(seat=seat, stage=stage)
         self.agent = Agent(cfg, client=client,
-                           logger=lambda level, text: self.get_logger().info(text))
+                           logger=lambda level, text: self.get_logger().info(text),
+                           trace_path=os.environ.get("RMTC_TRACE") or None)
 
         qos = qos_profile()
         self.publisher = self.create_publisher(String, f"/team_{seat}/action", qos)

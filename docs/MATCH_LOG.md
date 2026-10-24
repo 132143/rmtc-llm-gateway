@@ -123,3 +123,36 @@ git archive --format=tar -o repo.tar HEAD
 2. **多跑几局第二阶段**，把"打人 vs 捡资源"的权重做成参数扫一遍（现在只有一局的证据）。
 3. 把第一阶段在不同随机地图下的表现，用裁判的 `--config` 自定义地图验一次
    （`/api/config/1` 可以导入完整配置）。
+
+
+---
+
+## 九、裁判 API 的新发现（2026-10-23 晚）
+
+1. `POST /api/start` 的 body 支持完整场次参数，**可以加速练习**：
+
+```json
+{"stage": 2, "tick_ms": 100, "max_ticks": 200, "bots": ["B", "C", "D"],
+ "config": { "……完整场地配置……" }}
+```
+
+   实测 settings 真的被应用（200 Tick × 100 ms = 20 秒一局）。默认是 500 Tick × 500 ms。
+
+2. `config` 里的 `missions`（例如 reach 的坐标）也能改，改完 `/api/state` 里能看到。
+
+```bash
+curl -s -X POST http://127.0.0.1:8080/api/start -H 'Content-Type: application/json' \
+  -d '{"stage":2,"tick_ms":100,"max_ticks":200,"bots":["B","C","D"],"config":<stage2 配置>}'
+curl -s -X POST http://127.0.0.1:8080/api/resume -H 'Content-Type: application/json' -d '{}'
+```
+
+## 十、踩坑：Windows 上 `git archive` 出来的 .sh 是 CRLF
+
+`core.autocrlf=true` 时，`git archive` 产出的 `.sh` 带 CRLF，丢进虚拟机 bash 直接报
+`$'\r': command not found`。已加 `.gitattributes`（`*.sh text eol=lf`），脚本里也加了
+`sed -i 's/\r$//'` 兜底。
+
+## 十一、虚拟机 GitHub 连通性
+
+插上网线后虚拟机可直连 GitHub（`curl https://github.com` → 200），可以 `git clone/pull`；
+但 TLS 偶发失败（`GnuTLS recv error`），所以部署脚本做成"git 失败就用 tar 覆盖"。

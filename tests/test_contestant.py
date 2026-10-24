@@ -215,6 +215,22 @@ class TestAgent(unittest.TestCase):
         action = agent.on_perception(frame)
         self.assertEqual(action["action"], "defend")
 
+    def test_trace_file_records_each_decision(self):
+        import json as jsonlib
+        import os
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trace-test.jsonl")
+        if os.path.exists(path):
+            os.remove(path)
+        self.addCleanup(lambda: os.path.exists(path) and os.remove(path))
+        agent = Agent(AgentConfig(seat="A", stage=1), trace_path=path)
+        agent.on_perception(perception(tick=0, pos=(8, 8)))
+        agent.on_perception(perception(tick=1, pos=(8, 8)))
+        with open(path, encoding="utf-8") as handle:
+            lines = [jsonlib.loads(line) for line in handle if line.strip()]
+        self.assertEqual(len(lines), 2)
+        self.assertEqual(lines[0]["tick"], 0)
+        self.assertIn(lines[0]["action"], ("move", "attack", "defend", "wait"))
+
     def test_snake_strategy_can_be_selected(self):
         agent = Agent(AgentConfig(seat="A", stage=1, strategy="snake"))
         agent.on_perception(perception(tick=0, pos=(8, 8)))

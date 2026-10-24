@@ -67,10 +67,12 @@ class AgentConfig:
 class Agent:
     """一局一个实例。on_perception() 返回要发布的消息，重复/旧帧返回 None。"""
 
-    def __init__(self, cfg: AgentConfig | None = None, client=None, logger=None):
+    def __init__(self, cfg: AgentConfig | None = None, client=None, logger=None,
+                 trace_path=None):
         self.cfg = cfg or AgentConfig()
         self.client = client
         self._logger = logger
+        self.trace_path = trace_path   # 决策轨迹（jsonl），复盘用；None 表示不记
         self.strategy = None
         self.understanding = None
         self.session_id = ""
@@ -148,7 +150,33 @@ class Agent:
         payload = {"tick": tick, "session_id": session_id}
         payload.update(action)
         self.stats["actions"] += 1
+        self._trace(payload, me, data)
         return payload
+
+    def _trace(self, payload, me, data):
+        """每 Tick 一行 jsonl：位置、血量、分数、动作。真实场次出问题时靠它复盘。"""
+        if not self.trace_path:
+            return
+        score = data.get("score") if isinstance(data.get("score"), dict) else {}
+        record = {
+            "tick": payload.get("tick"),
+            "session_id": payload.get("session_id"),
+            "pos": list(self.pos) if self.pos else None,
+            "hp": me.get("hp"),
+            "alive": me.get("alive"),
+            "resource_value": score.get("resource_value"),
+            "effective_damage": score.get("effective_damage"),
+            "missions": score.get("mission_completed"),
+            "action": payload.get("action"),
+            "direction": payload.get("direction"),
+            "combat": self.cfg.combat_mode,
+        }
+        try:
+            import json
+            with open(self.trace_path, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except OSError as exc:
+            self._log("warn", f"轨迹写入失败：{exc}")
 
     def _start_session(self, session_id):
         self.session_id = session_id

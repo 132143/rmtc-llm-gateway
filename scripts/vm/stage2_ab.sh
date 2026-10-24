@@ -1,7 +1,11 @@
 #!/bin/bash
 # 第二阶段 A/B：多种战斗模式 × 多张图 × 多次重复，输出 CSV。
 # 用法: stage2_ab.sh [repeats] [ticks] [tickms]
-REPEATS="${1:-3}"
+# 防并发：之前两个批次同时跑会把 CSV 写乱（实测踩过）
+exec 9>/tmp/stage2_ab.lock
+flock -n 9 || { echo "已有一个批次在跑，退出"; exit 1; }
+
+REPEATS="${1:-2}"
 TICKS="${2:-200}"
 TICKMS="${3:-100}"
 REACH=$(( TICKS * 3 / 5 ))
