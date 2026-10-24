@@ -522,6 +522,42 @@ class TestAgent(unittest.TestCase):
         self.assertIn(action["direction"], ("right", "down"))
         self.assertGreaterEqual(agent.reach_moves, 1)
 
+    def test_late_join_goes_for_reach_early(self):
+        """实测晚 join 26 Tick 会丢掉全部开局资源；这时应尽早去任务点，而不是死等 250 Tick。"""
+        agent = Agent(AgentConfig(seat="A", stage=2, combat_mode="hybrid", reach_after_tick=250))
+        agent.on_perception(perception(tick=30, pos=(3, 3), hp=100,
+                                      missions=[{"id": "reach_target", "type": "reach",
+                                                 "position": [9, 9]}]))
+        self.assertTrue(agent.late_join)
+        action = agent.on_perception(perception(tick=31, pos=(3, 3), hp=100,
+                                                missions=[{"id": "reach_target", "type": "reach",
+                                                           "position": [9, 9]}]))
+        self.assertEqual(action["action"], "move")
+
+    def test_no_resources_left_goes_for_reach(self):
+        agent = Agent(AgentConfig(seat="A", stage=2, combat_mode="hybrid", reach_after_tick=250))
+        agent.on_perception(perception(tick=0, pos=(3, 3), hp=100,
+                                      missions=[{"id": "reach_target", "type": "reach",
+                                                 "position": [9, 9]}]))
+        agent.explored = {(x, y) for x in range(18) for y in range(18)}
+        action = agent.on_perception(perception(tick=80, pos=(3, 3), hp=100,
+                                                missions=[{"id": "reach_target", "type": "reach",
+                                                           "position": [9, 9]}]))
+        self.assertEqual(action["action"], "move")
+
+    def test_high_value_mission_uses_wider_gate_early(self):
+        """只有 4 个高价值资源，抢不到就白丢 5 分：前期放宽到 12 格。"""
+        agent = Agent(AgentConfig(seat="A", stage=2, combat_mode="hybrid",
+                                  mission_max_distance=8))
+        agent.on_perception(perception(tick=0, pos=(8, 8)))
+        agent.strategy.seen_resources[(18, 8)] = 20      # 10 格外（普通门限 8 会放弃）
+        frame = perception(tick=20, pos=(8, 8),
+                           missions=[{"id": "collect_high_value", "type": "high_resources", "target": 1}])
+        frame["score"] = {"resource_value": 0, "mission_completed_ids": []}
+        action = agent.on_perception(frame)
+        self.assertEqual(action["action"], "move")
+        self.assertEqual(action["direction"], "right")
+
     def test_defend_does_not_lock_the_robot(self):
         """真机踩过：血量长期 20 时连续 251 帧都在防御，任务与伤害全丢。"""
         agent = self.make_agent(stage=2, low_hp=30, reach_after_tick=10)
