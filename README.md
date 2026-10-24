@@ -51,6 +51,17 @@ python3 examples/llm_demo.py
 python3 run_tests.py -v      # → Ran 63 tests / OK
 ```
 
+## 0.0 想快速看懂这个项目？先读 docs/onboarding/
+
+| 文件 | 讲什么 |
+|---|---|
+| docs/onboarding/00_怎么读.md | 五份文档的阅读路线（答辩 / 调试 / 上场三条） |
+| docs/onboarding/01_这是一场什么比赛.md | 计分公式、地图动作、八种事件、三段时间轴（去术语版） |
+| docs/onboarding/02_项目怎么搭起来的.md | 三个盒子 + 每个文件一句话 + 感知/动作样例 |
+| docs/onboarding/03_一次决策走完全程.md | 16 步决策优先级、三条增量、两条铁律 |
+| docs/onboarding/04_跑起来与改代码.md | 命令逐段拆、10 个常改点、报错对照 |
+| docs/onboarding/05_答辩与现场.md | 20 个答辩问答、上场清单、止损线 |
+
 ## 0. 本轮融合（2026-10-24）：一个默认内核 + 一个评测台
 
 | 新增 | 作用 | 文档 |
