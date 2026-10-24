@@ -2,7 +2,7 @@
 # 在官方练习裁判上扫一批第一阶段的图，跑同一个策略。
 # 用法: runsweep.sh <strategy: greedy|snake> [地图目录]
 # 结果追加到 /tmp/sweep_<strategy>.txt，一行一局：名字 得分 资源 非法动作 感知数
-set -u
+# 注意：不要开 set -u —— source /opt/ros/humble/setup.bash 会引用未定义变量
 STRATEGY="${1:-greedy}"
 MAPDIR="${2:-$HOME/rmtc-llm-gateway/docs/sweep_maps}"
 RESULTS=/tmp/sweep_${STRATEGY}.txt
