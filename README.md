@@ -51,6 +51,20 @@ python3 examples/llm_demo.py
 python3 run_tests.py -v      # → Ran 63 tests / OK
 ```
 
+## 0. 本轮融合（2026-10-24）：一个默认内核 + 一个评测台
+
+| 新增 | 作用 | 文档 |
+|---|---|---|
+| contestant/tactics.py | 封存参数与五类收益公式（纯函数，02/03 号文件的代码化） | docs/FUSION_REPORT.md 三 |
+| contestant/planner.py | 收益表决策内核（H1–H6 + 资源/任务/治疗/堡垒/战斗 argmax） | 同上 |
+| contestant/stage2_sim.py | 第二阶段离线仿真器（按规则 §5.2 十步结算） | 同上 4.4 |
+| contestant/eval_lab.py | 对照实验台（基线/单策略/组合/裁剪 × 地图/对手 × 重复） | 同上 四 |
+| tests/test_fused_core.py | 37 个新单测（参数层/决策层/结算层） | — |
+
+**封存默认：planner=guarded** —— 原版决策路径不动，只叠三条实测有效的增量
+（资源记忆证伪、对抗分封顶感知、战争期不再空等），外加争格避让 H2。
+收益表内核（fused）保留为可切换枚举，实测未超过原版路径（见 docs/FUSION_REPORT.md 第五节）。
+
 ## 1. 目录结构
 
 三块代码互不依赖，可以分开看、分开测：

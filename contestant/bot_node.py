@@ -204,8 +204,12 @@ def main(argv=None):
         chosen["combat_mode"] = args.combat
     agent_cfg = AgentConfig(seat=seat, stage=args.stage,
                             strategy=chosen["strategy"], combat_mode=chosen["combat_mode"],
+                            # 决策内核与参数增量由"已登记枚举"决定（规则 §2.3），现场只改字符串
+                            planner=chosen.get("planner", "legacy"),
+                            # 参数增量按"枚举自己声明的参数组"取（pressure 用 pressure 的权重表）
+                            decision_type=chosen.get("decision_type_tag", decision_type),
                             reach_after_tick=args.reach_after_tick,
-                            strategy_detour=args.detour,
+                            strategy_detour=chosen.get("detour", args.detour),
                             mission_max_distance=args.mission_max_distance,
                             patrol_when_idle=not args.no_patrol,
                             opening_mode=args.opening_mode,
