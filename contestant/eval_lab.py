@@ -73,6 +73,18 @@ GROUPS = {
     # 资源争抢评估（race guard）：关掉它 = 上一版行为
     "guarded_no_race_guard": {"kind": "ablation", "planner": "guarded",
                               "combat_mode": "hybrid", "race_guard": False},
+    # 战争期巡逻两个小修：① 热点在脚下就换下一个（消等待）② 末期封顶后不巡逻（少送死）
+    "guarded_patrol_off": {"kind": "ablation", "planner": "guarded", "combat_mode": "hybrid",
+                           "patrol_skip_reached": False, "late_cap_guard": False},
+    "guarded_only_skip": {"kind": "combo", "planner": "guarded", "combat_mode": "hybrid",
+                          "late_cap_guard": False},
+    "guarded_only_cap": {"kind": "combo", "planner": "guarded", "combat_mode": "hybrid",
+                         "patrol_skip_reached": False},
+    # 开局静默：前 60/120 片不开火，验证"早期接敌是否拖累资源下限"
+    "guarded_quiet60": {"kind": "combo", "planner": "guarded", "combat_mode": "hybrid",
+                        "early_quiet": 60},
+    "guarded_quiet120": {"kind": "combo", "planner": "guarded", "combat_mode": "hybrid",
+                         "early_quiet": 120},
     "guarded_race_k8": {"kind": "combo", "planner": "guarded", "combat_mode": "hybrid",
                         "race_history_ticks": 8},
     "guarded_race_k16": {"kind": "combo", "planner": "guarded", "combat_mode": "hybrid",

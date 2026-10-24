@@ -63,7 +63,8 @@ class AgentConfig:
                  pursue_r=None, ambush_on=None, param_overrides=None,
                  memory_falsify=None, mission_portfolio=True, obstacle_ttl=40,
                  high_value_scale=1.0, high_first_ticks=250, race_guard=False,
-                 race_history_ticks=12, race_weak_hp=40, race_weak_ratio=0.6):
+                 race_history_ticks=12, race_weak_hp=40, race_weak_ratio=0.6,
+                 patrol_skip_reached=False, late_cap_guard=False, early_quiet=0):
         self.seat = seat
         self.stage = stage
         self.max_hp = max_hp
@@ -136,7 +137,15 @@ class AgentConfig:
         self.race_guard = bool(race_guard)
         self.race_history_ticks = int(race_history_ticks)   # 用多少片内的动向作证据
         self.race_weak_hp = float(race_weak_hp)             # 低于这个血量算"明显更弱"
-        self.race_weak_ratio = float(race_weak_ratio)       # 或低于我方血量的这个比例
+        self.race_weak_ratio = float(race_weak_ratio)
+        # 战争期巡逻的两个小修（**默认都关，实测无收益甚至更差**）：
+        #   ① patrol_skip_reached：热点在脚下就换下一个。等待从 91 片降到 7.6 片，
+        #      但均值 −0.52（95% CI [−0.90,−0.18]，p=0.009），撞墙 +1.9、死亡 +0.37 → 拒绝。
+        #   ② late_cap_guard：末期封顶后不巡逻。96 局逐位相同（完全惰性）→ 保留但不启用。
+        self.patrol_skip_reached = bool(patrol_skip_reached)
+        self.late_cap_guard = bool(late_cap_guard)
+        # 开局静默：前 N 片不主动开火（只保命、只抢资源）。用于验证"早期接敌是否伤 rv 下限"。
+        self.early_quiet = int(early_quiet)
         if overrides:
             self.params = self.params.with_deltas(overrides)
 
@@ -351,6 +360,12 @@ class Agent:
         self.mission_portfolio_moves = 0
         self._race_veto = set()
         self.race_stats = {"checked": 0, "veto": 0, "exception": 0}
+        self._patrol_index = 0
+        # 撞墙归因（全盘诊断用）：占位 / 静态障碍 / 越界。三种的修法完全不同。
+        self.bump_stats = {"occupied": 0, "obstacle": 0, "oob": 0}
+        # 战争期巡逻里"伤害已封顶之后"的部分：这部分 Tick 的绝对分数价值≈0（只是同分比较用）
+        self.patrol_after_cap = 0
+        self.patrol_before_cap = 0
         self.llm_intent = "none"
         self.llm_intent_until = -1
         self.llm_intent_log = []
@@ -922,8 +937,9 @@ class Agent:
                     # 规则 §6.2：最近目标是出生保护时，它挡住后面的目标且自身伤害为 0 —— 打了纯浪费 Tick。
                     protected_target = target[0].get("protected") is True
                     direction = self._line_direction(target[1])
+                    quiet = (self.cfg.early_quiet and self.last_tick < self.cfg.early_quiet)
                     if (direction and not me.get("protected") and not protected_target
-                            and self._damage_worth_attacking(data)):
+                            and not quiet and self._damage_worth_attacking(data)):
                         return {"action": "attack", "direction": direction}   # 直线 1~2 格才打得到
             # 任务组合约束（只在"后半程还没补齐"时抢优先级）：
             # 战争期找人会连续吃掉几十个 Tick，而资源类任务一旦错过就再也补不回来（−5 分）。
@@ -1000,14 +1016,31 @@ class Agent:
                 and self.cfg.planner == "guarded" and self.war_phase):
             # 战争期原地 WAIT = 白扔 Tick。原版在"看不见敌人"时就是这么等的（实测最多 271/500）。
             # 这里只加一条：没敌人就往热区走一步，其余决策完全走原路径。
-            hot = self._war_hotspot()
-            direction = step_toward(self.pos, hot, self._blocked_now(), self.width, self.height)
-            if direction:
-                # 巡逻也要避开"本 Tick 必被占"的格子：小图上盲目走会撞出 E_BLOCKED
-                # （实测 practice18 上 patrol 把撞墙数抬到原版的 4 倍）。
-                direction = self._contention_detour(direction)
-                self.patrol_moves += 1
-                return self._move(direction)
+            damage_now = (data.get("score") or {}).get("effective_damage") \
+                if isinstance(data.get("score"), dict) else 0
+            damage_now = damage_now if isinstance(damage_now, (int, float)) else 0
+            if self.cfg.late_cap_guard and self.last_tick >= 400 and damage_now >= 520:
+                # 末期且伤害已封顶：多打一分不加，死一次掉 60 D 反而可能跌破 500 → 就地守
+                pass                                    # 守：不巡逻、不主动接敌
+            else:
+                hot = self._war_hotspot()
+                if self.cfg.patrol_skip_reached:
+                    for _ in range(self.WAR_POINTS + 1):
+                        if hot != self.pos:
+                            break
+                        self._patrol_index += 1          # 热点就在脚下：换下一个，别原地等
+                        hot = self._war_hotspot()
+                direction = step_toward(self.pos, hot, self._blocked_now(), self.width, self.height)
+                if direction:
+                    # 巡逻也要避开"本 Tick 必被占"的格子：小图上盲目走会撞出 E_BLOCKED
+                    # （实测 practice18 上 patrol 把撞墙数抬到原版的 4 倍）。
+                    direction = self._contention_detour(direction)
+                    self.patrol_moves += 1
+                    if damage_now >= 500:
+                        self.patrol_after_cap += 1
+                    else:
+                        self.patrol_before_cap += 1
+                    return self._move(direction)
         if (action.get("action") == "wait" and self.cfg.stage >= 2
                 and self.cfg.combat_mode == "hybrid" and enemies):
             # 资源已经抢完/看不见了：与其原地等到结束，不如去压制对手（可能抢到资源、也有伤害分）
@@ -1216,12 +1249,18 @@ class Agent:
                 best = (key, (x, y))
         return best[1] if best else None
 
+    WAR_POINTS = 5
+
     def _war_hotspot(self):
-        """战争期巡逻点：中心 + 四角内缩，按 Tick 轮换（确定性，不用随机数）。"""
+        """战争期巡逻点：中心 + 四角内缩，按 Tick + 偏移轮换（确定性，不用随机数）。
+
+        偏移量 _patrol_index 用来实现"热点就在脚下就换下一个"，否则会原地等到 40 片后轮换。
+        """
         points = ((self.width // 2, self.height // 2), (2, 2),
                   (self.width - 3, 2), (2, self.height - 3),
                   (self.width - 3, self.height - 3))
-        return points[(self.last_tick // 40) % len(points)]
+        index = (self.last_tick // 40 + self._patrol_index) % len(points)
+        return points[index]
 
     def _patrol_direction(self):
         """空闲时按巡逻点绕着走：中心 → 四个象限，走到就换下一个。"""
@@ -1451,9 +1490,14 @@ class Agent:
             # 越界是地图边界，永久有效（不参与过期）
             self.boundary_obstacles.add(blocked)
             self.known_obstacles.add(blocked)
+            self.bump_stats["oob"] += 1
         else:
             # E_BLOCKED 既可能是静态障碍，也可能是**别的车占位/争格失败**。
             # 当成永久障碍会让我们再也不去那一格（实测卡在任务点相邻格进不去）。
+            if blocked in self.known_obstacles or blocked in self.boundary_obstacles:
+                self.bump_stats["obstacle"] += 1     # 我们已经"知道"这里堵，还去撞 = 寻路/记忆问题
+            else:
+                self.bump_stats["occupied"] += 1     # 新出现的堵塞 = 多半是别的车占位
             self.transient_blocked[blocked] = self.last_tick + 8
         if self.strategy is not None:
             self.strategy.seen_resources.pop(blocked, None)
