@@ -156,3 +156,22 @@ curl -s -X POST http://127.0.0.1:8080/api/resume -H 'Content-Type: application/j
 
 插上网线后虚拟机可直连 GitHub（`curl https://github.com` → 200），可以 `git clone/pull`；
 但 TLS 偶发失败（`GnuTLS recv error`），所以部署脚本做成"git 失败就用 tar 覆盖"。
+
+
+## 十二、同一晚的补充验证（2026-10-23 深夜）
+
+| 项 | 结果 |
+|---|---|
+| `--dry-run` | 裁判 stage 1 上跑 7 秒 → 50 条 `[dry-run]` 动作，字段（tick/session_id/action/direction）与真实发布一致 |
+| 失联看门狗 | 无裁判时第 6.0 秒告警："5 秒没收到任何感知：检查 ROS_DOMAIN_ID / ROS_LOCALHOST_ONLY=0 / RMW_IMPLEMENTATION / 席位是否选对 / 裁判是否已开局" |
+| `RMTC_TRACE` | 200 Tick 一局写出 201 行 jsonl（tick、位置、血量、score、动作），可逐 Tick 复盘 |
+| 严格 A/B | 每格重起裁判+选手后，三次重复结果逐位相同 → 之前的"随机噪声"其实是**进程状态残留** |
+
+### 怎么判断"这局到底通没通"
+
+1. `RMTC_TRACE` 里有 200+ 行、tick 连续 → 感知这条链通了；
+2. `/api/state` 的 `checks.A.action_tick` 和 `executed_tick` 都有值 → 动作被接受并结算了；
+3. 感知里的 `self.last_action` 反映你上一步的动作（`moved`/`error`）；
+4. 第二阶段还要 `ai.A.success_count >= 1`（本场本席位）。
+
+只看 "感知 Tick 在涨" 不算通——那只证明裁判发出去了。

@@ -30,6 +30,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import (DurabilityPolicy, HistoryPolicy, QoSProfile,
                        ReliabilityPolicy)
@@ -144,11 +145,14 @@ def main(argv=None):
     node = RmtcBotNode(seat, args.stage, args.dry_run, agent_cfg)
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
+    except (KeyboardInterrupt, ExternalShutdownException):
+        pass                     # Ctrl-C / timeout / SIGTERM 都是正常收场，不必打 traceback
     finally:
-        node.destroy_node()
-        rclpy.shutdown()
+        try:
+            node.destroy_node()
+            rclpy.shutdown()
+        except Exception:
+            pass
     return 0
 
 
