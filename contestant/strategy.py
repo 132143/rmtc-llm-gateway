@@ -107,9 +107,12 @@ class GreedyBfsStrategy(BaseStrategy):
 
     name = "greedy_bfs"
 
-    def __init__(self, width, height, detour=0.0):
+    def __init__(self, width, height, detour=0.0, explore_bias="near"):
         super().__init__(width, height)
         self.detour = detour
+        # 探索偏置：near = 最近的未探明格（原版）；far = 最远的未探明格。
+        # 用途只在"任务缺稀缺资源、需要更快铺开视野"时临时切到 far。
+        self.explore_bias = explore_bias
 
     def decide(self, view):
         targets = dict(self.seen_resources)
@@ -127,14 +130,19 @@ class GreedyBfsStrategy(BaseStrategy):
         return self.explore(view)
 
     def explore(self, view):
-        """没资源记忆：BFS 去最近的未知格子（按已探明区域之外的第一格）。"""
+        """没资源记忆：去一个未探明的格子。
+
+        默认去最近的（原版）；explore_bias="far" 时去最远的——用于"缺稀缺资源"时
+        更快铺开视野（最近优先容易在出生点附近反复打转，实测会把整块区域留到很晚才看）。
+        """
         best = None
+        far = str(getattr(self, "explore_bias", "near")) == "far"
         for y in range(self.height):
             for x in range(self.width):
                 if (x, y) in view.explored or (x, y) in (self.blocked | view.obstacles):
                     continue
                 dist = abs(x - view.pos[0]) + abs(y - view.pos[1])
-                if best is None or dist < best[0]:
+                if best is None or (dist > best[0] if far else dist < best[0]):
                     best = (dist, (x, y))
         if best is None:
             return self.wait()

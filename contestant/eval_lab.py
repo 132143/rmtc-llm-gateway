@@ -67,6 +67,12 @@ GROUPS = {
                             "param_overrides": {"use_headroom": False}},
     "guarded_no_falsify": {"kind": "ablation", "planner": "guarded",
                            "combat_mode": "opportunistic", "memory_falsify": False},
+    # 关掉"任务组合约束"= 旧的"第一个未完成资源任务"逻辑（用来度量丢任务概率的变化）
+    "guarded_no_portfolio": {"kind": "ablation", "planner": "guarded",
+                             "combat_mode": "hybrid", "mission_portfolio": False},
+    # 障碍记忆"永久记住"（原版行为）对照：验证临时墙过期是不是引入的副作用
+    "guarded_ttl_forever": {"kind": "ablation", "planner": "guarded",
+                            "combat_mode": "hybrid", "obstacle_ttl": 100000},
     # 任务资源"顺路半径"标定（P-M 门限；实测低分全部来自资源类任务没完成）
     "guarded_md12": {"kind": "combo", "planner": "guarded", "combat_mode": "hybrid",
                      "memory_falsify": True, "mission_max_distance": 12},
@@ -164,6 +170,7 @@ def run_one(group_spec, env_name, opponent, seed, ticks):
         "resource_value": mine["resource_value"],
         "damage": mine["damage"],
         "missions": mine["missions"],
+        "mission_ids": list(mine.get("mission_ids") or []),
         "deaths": mine["deaths"],
         "invalid_actions": mine["invalid_actions"],
         "blocked_moves": mine["blocked_moves"],

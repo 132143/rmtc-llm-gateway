@@ -61,7 +61,7 @@ class AgentConfig:
                  patrol_when_idle=False, opening_mode="normal", opening_ticks=30,
                  planner="guarded", decision_type="balanced", engage_th=None,
                  pursue_r=None, ambush_on=None, param_overrides=None,
-                 memory_falsify=None):
+                 memory_falsify=None, mission_portfolio=True, obstacle_ttl=40):
         self.seat = seat
         self.stage = stage
         self.max_hp = max_hp
@@ -117,6 +117,12 @@ class AgentConfig:
         if memory_falsify is None:
             memory_falsify = planner in ("fused", "guarded")
         self.memory_falsify = bool(memory_falsify)
+        # 资源任务"组合约束"：任务要的是 ≥2 普通 + ≥1 高价值，所以按"还差几个什么"
+        # 去选目标，而不是只按价值/距离。关掉它 = 回到旧行为（对照实验用）。
+        self.mission_portfolio = bool(mission_portfolio)
+        # 障碍记忆的过期时间。40 = 让临时墙（世界分裂 30 Tick）能自然消失；
+        # 调大等于"永久记住"（原版行为），对照实验用。
+        self.obstacle_ttl = int(obstacle_ttl)
         if overrides:
             self.params = self.params.with_deltas(overrides)
 
@@ -325,6 +331,10 @@ class Agent:
         self.vision_seen = None
         self.fused_actions = 0
         self.fused_reasons = {}
+        self.collected = {"normal": 0, "high": 0}
+        self._last_resource_total = 0
+        self._completed_ids = set()
+        self.mission_portfolio_moves = 0
         self.llm_intent = "none"
         self.llm_intent_until = -1
         self.llm_intent_log = []
@@ -454,6 +464,7 @@ class Agent:
         score = data.get("score") if isinstance(data.get("score"), dict) else {}
         value = score.get("resource_value")
         value = value if isinstance(value, (int, float)) else 0
+        self._update_collected(score, value)
         # 额外两个闸门，防止"探索得差"被误判成"资源见底"：
         #   1) 本场必须真的见过资源（否则只是还没找到，不是没了）；
         #   2) 当前视野里确实一个资源都没有。
@@ -490,6 +501,67 @@ class Agent:
 
     def _llm_intent_active(self, intent):
         return self.llm_intent == intent and self.last_tick <= self.llm_intent_until
+
+    def _update_collected(self, score, resource_value):
+        """统计本场已收集的普通/高价值资源个数（任务组合约束要用）。
+
+        只用两样合法信息：score.resource_value 的增量（10 = 普通，20 = 高价值）与
+        已完成任务 id（用来纠偏）。不读取任何私有数据。
+        """
+        total = int(resource_value)
+        delta = total - self._last_resource_total
+        if delta > 0:
+            if delta >= 20:
+                self.collected["high"] += 1
+            else:
+                self.collected["normal"] += 1
+            self._last_resource_total = total
+        elif delta < 0:
+            self._last_resource_total = total      # 不该发生；自愈，避免后续差值为负
+        done = score.get("mission_completed_ids")
+        if isinstance(done, list):
+            self._completed_ids = set(str(x) for x in done if isinstance(x, str))
+            if "collect_two_normal" in done:
+                self.collected["normal"] = max(self.collected["normal"], 2)
+            if "collect_high_value" in done:
+                self.collected["high"] = max(self.collected["high"], 1)
+
+    def _mission_shortfall(self):
+        """还差几个普通 / 高价值资源。目标数从 missions[].target 读，不写死。"""
+        short = {}
+        for mission in self.missions:
+            if not isinstance(mission, dict):
+                continue
+            kind = mission.get("type")
+            if kind not in ("normal_resources", "high_resources"):
+                continue
+            if mission.get("id") in self._completed_ids:
+                continue
+            target = mission.get("target")
+            target = int(target) if isinstance(target, (int, float)) else (
+                2 if kind == "normal_resources" else 1)
+            bucket = "normal" if kind == "normal_resources" else "high"
+            got = self.collected.get(bucket, 0)
+            if got < target:
+                short[bucket] = target - got
+        return short
+
+    def _mission_radius(self, bucket=None):
+        """补任务资源的搜索半径（按类型分开算）。
+
+        依据：实测丢的任务几乎都是"高价值"（全图只有 4 个，抢不到就没了）。
+        所以稀缺项（高价值）在**早期**就放宽，而不是等 250 Tick——那时资源早被分完：
+          · 高价值且一个都没拿到：+6（8 → 14 格）；
+          · 后半程统一 +6，末段再 +4（沿用 reach_after_tick 当分界，不新增参数）。
+        """
+        base = max(0, int(self.cfg.mission_max_distance))
+        if bucket == "high" and self.collected.get("high", 0) == 0:
+            base += 6
+        if self.last_tick >= self.cfg.reach_after_tick:
+            base += 6
+        if self.last_tick >= self.cfg.reach_after_tick + 150:
+            base += 4
+        return base
 
     def _danger_cells(self, parsed):
         """把模型输出的 avoid_cells 校验成合法格子集合（H1 用）。
@@ -761,6 +833,15 @@ class Agent:
                     if (direction and not me.get("protected") and not protected_target
                             and self._damage_worth_attacking(data)):
                         return {"action": "attack", "direction": direction}   # 直线 1~2 格才打得到
+            # 任务组合约束（只在"后半程还没补齐"时抢优先级）：
+            # 战争期找人会连续吃掉几十个 Tick，而资源类任务一旦错过就再也补不回来（−5 分）。
+            # 所以一旦进入后半程且还有缺口，补任务排到"找人"前面（仍然排在防御/攻击/任务点之后）。
+            if (self.cfg.mission_portfolio and self.cfg.planner in ("fused", "guarded")
+                    and self.last_tick >= self.cfg.reach_after_tick and hp > 15
+                    and self._mission_shortfall()):
+                urgent = self._mission_resource_move(data)
+                if urgent is not None:
+                    return urgent
             if self.cfg.planner == "fused":
                 # 收益表内核：资源/任务/治疗/堡垒/战斗统一打分后取 argmax。
                 # 位置说明：排在防御（H3）、任务点（H6）、进射程就打之后——
@@ -800,6 +881,8 @@ class Agent:
         resources = self._resources(data)
         view = View(self.pos, resources, self._blocked_now(), self.explored, set(),
                     set(), self.last_tick, self.cfg.vision_radius)
+        # 探索偏置默认不做（实测"往最远的未探明区走"是负收益：丢任务 34%→47%、
+        # 均值 −3.9、撞墙翻倍）。保留 strategy.explore_bias 开关，但默认 near = 原版行为。
         self.strategy.observe(view)
         action = self.strategy.decide(view)
         if (action.get("action") == "wait" and self.cfg.stage >= 2
@@ -843,11 +926,57 @@ class Agent:
         return action
 
     def _mission_resource_move(self, data):
-        """任务里的"至少 N 个某类资源"只值 5 分，但只要还没完成、又看得见/记得目标，就该先去。
+        """补资源任务要的那一类资源（组合约束版）。
 
-        规则 §10.1：每个任务 ID 只结算一次，完成后不撤销；任务判定在战斗后，只为存活车辆检查。
-        这里只挑"还没完成的那个资源任务"里最近的资源，避免为了 5 分把整局时间耗掉。
+        规则 §10.1：每个任务 ID 只结算一次、判定在战斗后、只对存活车辆检查。
+        任务要的是"≥2 普通 + ≥1 高价值"，所以目标选择必须看**还差哪一类**：
+          · 只按"价值/距离"贪心时，会连着拿两个高价值（20 分面额更好看），
+            结果"2 个普通"永远补不上——实验室里 12/48 局丢一个资源任务就是这个原因；
+          · 这里改成：先算缺口 → 只在缺口类型里挑最近的一个 → 越晚半径越大；
+          · 高价值只有 4 个（稀缺），所以两类都有候选时优先高价值，
+            除非普通资源近出 P-R-05 的容忍比（默认 2 倍）。
+        目标：把"丢任务"的概率压下去，而不是把均值调高。
         """
+        if self.strategy is None or self.pos is None or self.cfg.stage < 2:
+            return None
+        if not self.cfg.mission_portfolio:
+            return self._mission_resource_move_legacy(data)
+        short = self._mission_shortfall()
+        if not short:
+            return None
+        radius = {bucket: self._mission_radius(bucket) for bucket in short}
+        seen = dict(self.strategy.seen_resources)
+        for pos, value in self._resources(data):
+            seen[pos] = value
+        candidates = {"normal": [], "high": []}
+        for (x, y), value in seen.items():
+            bucket = "high" if value >= 20 else "normal"
+            if bucket not in short:
+                continue
+            distance = abs(x - self.pos[0]) + abs(y - self.pos[1])
+            if distance == 0 or distance > radius.get(bucket, 0):
+                continue
+            candidates[bucket].append((distance, (x, y)))
+        high = min(candidates["high"]) if candidates["high"] else None
+        normal = min(candidates["normal"]) if candidates["normal"] else None
+        if high is None and normal is None:
+            return None
+        if high is not None and normal is not None:
+            tolerance = max(1.0, float(self.cfg.params.high_priority))
+            chosen = high if high[0] <= tolerance * normal[0] else normal
+        else:
+            chosen = high or normal
+        distance, target = chosen
+        direction = step_toward(self.pos, target, self._blocked_now(),
+                                self.width, self.height)
+        if not direction:
+            return None
+        self.mission_moves += 1
+        self.mission_portfolio_moves += 1
+        return self._move(direction)
+
+    def _mission_resource_move_legacy(self, data):
+        """旧行为（只挑第一个未完成资源任务里最近的资源）：留作对照实验与回滚。"""
         if self.strategy is None or self.pos is None or self.cfg.stage < 2:
             return None
         score = data.get("score") if isinstance(data.get("score"), dict) else {}
@@ -1232,7 +1361,7 @@ class Agent:
         """
         return self.width * self.height >= 400
 
-    OBSTACLE_TTL = 40   # Tick：这么久没再看到，就认为它可能是临时墙，先当空地处理
+    OBSTACLE_TTL = 40   # 默认值；实例值见 AgentConfig.obstacle_ttl
 
     def _blocked_now(self):
         """当前有效的障碍 = 近期见过的障碍（含临时墙） + 地图边界 + 还没过期的临时堵塞。"""
@@ -1240,8 +1369,9 @@ class Agent:
         if self.transient_blocked:
             self.transient_blocked = {cell: until for cell, until in self.transient_blocked.items()
                                       if until >= now}
+        ttl = self.cfg.obstacle_ttl if self.cfg.obstacle_ttl else self.OBSTACLE_TTL
         fresh = {cell for cell, seen in self.obstacle_seen.items()
-                 if now - int(seen) <= self.OBSTACLE_TTL}
+                 if now - int(seen) <= ttl}
         return fresh | self.boundary_obstacles | set(self.transient_blocked)
 
     def _mark_explored(self):
