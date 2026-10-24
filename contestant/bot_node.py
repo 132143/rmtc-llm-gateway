@@ -130,7 +130,7 @@ def main(argv=None):
     parser.add_argument("--strategy", default=os.environ.get("RMTC_STRATEGY", "greedy"),
                         choices=["greedy", "snake"])
     parser.add_argument("--combat",
-                        default=os.environ.get("RMTC_COMBAT_MODE", "opportunistic"),
+                        default=os.environ.get("RMTC_COMBAT_MODE", "hybrid"),
                         choices=["never", "opportunistic", "resource_first", "finish",
                                  "hybrid", "aggressive"])
     parser.add_argument("--reach-after-tick", type=int,

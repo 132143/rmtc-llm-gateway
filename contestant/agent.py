@@ -39,11 +39,11 @@ class AgentConfig:
     strategy: "greedy"（BFS 贪心，默认）/"snake"（原骨架逻辑，用来做基线对照）
     combat_mode:
         "never"          第二阶段也不打人（纯采集）
-        "opportunistic"  已经进入直线 1~2 格就出手
+        "opportunistic"  已经进入直线 1~2 格就出手（默认的旧模式）
         "resource_first" 先采集：资源价值达到 resource_threshold 之前不打人
                         （实测在资源被堵的图上更差，只作为对照保留）
         "finish"         只在能补刀时出手（视野内敌人血量 <= finish_hp 且已进入直线射程）
-        "hybrid"        顺路就打；没有资源可捡时改为主动找人（不空转等比赛结束）
+        "hybrid"        顺路就打；没有资源可捡时改为主动找人（默认；正式节奏实测 45.0，最优）
         "aggressive"     附近（<= aggressive_range 格）有敌人就主动靠过去
     reach_after_tick: 这个 Tick 之后才去"到达指定坐标"的任务点
     resource_threshold: resource_first 模式的开关线（第二阶段资源分 30 分在 120 价值封顶）
@@ -51,7 +51,7 @@ class AgentConfig:
 
     def __init__(self, seat="A", stage=2, max_hp=100, attack_damage=20,
                  defended_damage=10, low_hp=30, reach_after_tick=250,
-                 vision_radius=4, strategy="greedy", combat_mode="opportunistic",
+                 vision_radius=4, strategy="greedy", combat_mode="hybrid",
                  aggressive_range=4, resource_threshold=120, finish_hp=60):
         self.seat = seat
         self.stage = stage
