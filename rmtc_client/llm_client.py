@@ -26,7 +26,9 @@ _BACKOFF_CODES = {"rate_limit", "concurrency_limit", "audit_unavailable",
 class ClientConfig:
     url: str = "http://127.0.0.1:8080/v1/chat/completions"
     token: str = "practice-A"
-    timeout_s: float = 1.5
+    # 真实模型（DeepSeek）实测：中位 0.9s、p90 1.1s、最大 1.4s。
+    # 500 ms/Tick 的节奏下 2.5 s 只占 5 个 Tick，且调用是异步的，不会堵动作窗。
+    timeout_s: float = 2.5
     min_interval_s: float = 2.0   # 两次调用之间的最小间隔
     # 本地预算：规则 §11.3「暂定每席位令牌成功调用上限 100」。
     # 留出余量（心跳+事件都在里面），默认 60，别把额度一次性烧光。

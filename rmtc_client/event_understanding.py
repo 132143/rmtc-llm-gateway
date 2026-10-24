@@ -14,18 +14,20 @@ import time
 
 from .json_extract import extract_first_json_object
 
-PROMPT_TEMPLATE = """你是机器人比赛的决策助手。请只依据下面这条公告做理解，并用严格 JSON 回答。
+PROMPT_TEMPLATE = """你是机器人比赛的决策助手。只依据下面的公告做理解，用严格 JSON 回答。
 
-当前状态：席位 {seat}，Tick {tick}，本车位置 {position}，地图 {map_width}x{map_height}。
+当前：席位 {seat}，Tick {tick}，本车位置 {position}，地图 {map_width}x{map_height}。
 固定任务：{mission}
-随机事件公告：{event}
+公告：{event}
 
-要求：
-1. 只输出一个 JSON 对象，不要代码块，不要多余解释；
-2. 字段：threat_zone（受影响的矩形 [[x1,y1],[x2,y2]] 或 null）、
-   affects_me（布尔）、advice（一句话中文应对建议）、urgency_ticks（整数或 null）；
-3. 公告没提到的影响，按 null / false 处理，不要编造；
-4. threat_zone 必须是矩形左上角与右下角两个整数坐标点。
+只输出一个 JSON 对象（不要代码块、不要解释），字段含义：
+- threat_zone: 会扣血/致死/危险的矩形 [[x1,y1],[x2,y2]]，没有就 null
+- heal_zone: 能回血的矩形或点位 [[x1,y1],[x2,y2]]，没有就 null
+- direction_reversed: 我的移动方向会被上下左右颠倒吗（布尔）
+- reversed_until_tick: 反向效果结束的 Tick（整数），没有就 null
+- affects_me: 这件事是否会影响我（布尔）
+- advice: 一句话中文建议
+公告没提到的一律 null / false，不要编造。坐标必须是整数。
 """
 
 
@@ -66,7 +68,10 @@ class EventUnderstanding:
         prompt = PROMPT_TEMPLATE.format(
             seat=seat or "?", tick=tick, position=position or (0, 0),
             map_width=map_size[0], map_height=map_size[1],
-            mission=mission_text or "（无）", event=event_text)
+            mission=mission_text or "（无）",
+            # 公告是累加的（每 Tick 的 event_text 会重复近期内容）。只送最近一段，
+            # 既省 token 也降延迟；更早的信息已经不影响当前决策。
+            event=event_text[-800:])
         self._asked[key] = now
         self._pending.append(self.client.ask_async(prompt, session_id=session_id, tick=tick))
         self._pending = self._pending[-4:]

@@ -260,6 +260,40 @@ class TestAgent(unittest.TestCase):
         agent.on_perception(perception(tick=3))          # 到点亮心跳
         self.assertEqual(offers, ["__heartbeat__"])
 
+    def test_illusion_reverses_move_only(self):
+        """规则 §8.3：幻术让 MOVE 上下左右互换，ATTACK 方向不反转。"""
+        agent = self.make_agent(stage=2)
+
+        class FakeUnderstanding:
+            def offer(self, *args, **kwargs):
+                return True
+
+            def hint(self, *args, **kwargs):
+                return {"parsed": {"direction_reversed": True, "reversed_until_tick": 500},
+                        "advice": "方向被颠倒", "tick": 1, "session_id": "m1"}
+
+        agent.understanding = FakeUnderstanding()
+        # 资源在正上方 → 正常应走 up；幻术生效时应变成 down
+        action = agent.on_perception(perception(tick=2, pos=(8, 8), resources=(((0, -3), 10),)))
+        self.assertEqual(action["action"], "move")
+        self.assertEqual(action["direction"], "down")
+        self.assertGreaterEqual(agent.effects_applied, 1)
+
+    def test_expired_illusion_does_not_reverse(self):
+        agent = self.make_agent(stage=2)
+
+        class FakeUnderstanding:
+            def offer(self, *args, **kwargs):
+                return True
+
+            def hint(self, *args, **kwargs):
+                return {"parsed": {"direction_reversed": True, "reversed_until_tick": 1},
+                        "advice": "已过期", "tick": 1, "session_id": "m1"}
+
+        agent.understanding = FakeUnderstanding()
+        action = agent.on_perception(perception(tick=5, pos=(8, 8), resources=(((0, -3), 10),)))
+        self.assertEqual(action["direction"], "up")
+
     def test_threat_zone_triggers_escape(self):
         agent = self.make_agent(stage=2)
 

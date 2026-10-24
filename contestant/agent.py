@@ -94,6 +94,8 @@ class Agent:
         self.known_obstacles = set()   # 见过的障碍（静态，可以永久记住）
         self.last_move = None          # (出发点, 方向)：用来解释下一帧的 E_BLOCKED
         self.ai_confirmed = False      # 本场是否已经有过成功的 AI 调用（规则要求 ≥1）
+        self._hint = None              # 最近一次可用的模型提示（含幻术/威胁区）
+        self.effects_applied = 0       # 按模型提示改过几次动作（复盘用）
         self.stats = {"perceptions": 0, "actions": 0, "skipped": 0}
 
     # ---------- 日志 ----------
@@ -240,6 +242,7 @@ class Agent:
                     event_key="__heartbeat__")
 
         hint = self.understanding.hint(self.session_id, self.last_tick) if self.understanding else None
+        self._hint = hint
         if hint is not None:
             escape = self._threat_escape(hint.get("parsed"))
             if escape:
@@ -336,6 +339,8 @@ class Agent:
         if not isinstance(parsed, dict) or self.pos is None:
             return None
         zone = parsed.get("threat_zone")
+        if not isinstance(zone, list):
+            zone = parsed.get("death_zone")
         if isinstance(zone, list) and len(zone) == 2:
             try:
                 first, second = zone
@@ -375,10 +380,30 @@ class Agent:
         return None
 
     # ---------- 记忆维护 ----------
+    # 规则 §8.3「幻术」：MOVE 的 up/down、left/right 互换，ATTACK 的方向不反转。
+    # 这个效果只能靠 LLM 理解公告得出（禁止关键词解析），所以这里消费模型输出。
+    _OPPOSITE = {"up": "down", "down": "up", "left": "right", "right": "left"}
+
     def _move(self, direction):
         """记下"这一步从哪走、往哪走"，下一帧用它解释 E_BLOCKED。"""
+        direction = self._apply_reversal(direction)
         self.last_move = (self.pos, direction)
         return {"action": "move", "direction": direction}
+
+    def _apply_reversal(self, direction):
+        hint = getattr(self, "_hint", None)
+        if not hint:
+            return direction
+        parsed = hint.get("parsed")
+        if not isinstance(parsed, dict) or parsed.get("direction_reversed") is not True:
+            return direction
+        until = parsed.get("reversed_until_tick")
+        if isinstance(until, (int, float)) and self.last_tick > int(until):
+            return direction          # 已过期
+        reversed_direction = self._OPPOSITE.get(direction, direction)
+        if reversed_direction != direction:
+            self.effects_applied += 1
+        return reversed_direction
 
     def _learn_from_last_action(self, last_action):
         """上一 Tick 撞墙/越界 → 把那格记成障碍（协议允许记住自己的失败）。"""
