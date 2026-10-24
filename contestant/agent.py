@@ -344,14 +344,15 @@ class Agent:
             # 任务点优先于"追人"：实测镜像局里 reach 任务被追击挤掉，白丢 5 分
             # 只有"确实见过资源、现在一个都没有了"才算没得捡；
             # 开局本来就没记忆，不能据此提前放弃搜索（实测会让分数掉到 3 分）。
-            nothing_to_collect = (self.last_tick >= 150 and self.resources_ever_seen > 0
+            nothing_to_collect = (self._is_large_map() and self.last_tick >= 150
+                                  and self.resources_ever_seen > 0
                                   and not self.strategy.seen_resources
                                   and not self._resources(data))
             # 注意：晚开局**不**提前冲任务点——四席环境里晚 5~30 Tick 是常态，
             # 提前改去任务点会让整局抢不到资源（实测 rv=0、只剩 1 个任务）。
             go_reach_now = (self.last_tick >= self.cfg.reach_after_tick or nothing_to_collect)
-            if self.last_tick < self.reach_cooldown_until:
-                pass            # 刚撞不开：这一段时间先按普通策略走（抢资源/打人），过会儿再来
+            if self._is_large_map() and self.last_tick < self.reach_cooldown_until:
+                pass            # 大图：刚撞不开，先按普通策略走（抢资源/打人），过会儿再来
             elif reach_pending and go_reach_now and hp > 15:
                 direction = step_toward(self.pos, reach_target,
                                         self._blocked_now(),
@@ -769,6 +770,14 @@ class Agent:
         dx, dy = DIRECTIONS.get(direction, (0, 0))
         nxt = (self.pos[0] + dx, self.pos[1] + dy)
         return any(epos == nxt for _entity, epos in enemies)
+
+    def _is_large_map(self):
+        """规则 §4.1：正式第二阶段是 24×24（第一阶段 20×20），练习包是 18×18。
+
+        "没资源就提前去任务点 / 撞不开就冷却" 这类行为只在大地图上有意义：
+        18×18 上资源 20 Tick 就被分完，提前离开争夺区反而亏（实测均值 43.5 → 39.2）。
+        """
+        return self.width * self.height >= 400
 
     def _blocked_now(self):
         """当前有效的障碍集合 = 静态障碍 + 还没过期的临时堵塞。"""
