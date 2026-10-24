@@ -122,6 +122,7 @@ class Agent:
         self._last_defend_tick = -99   # 上次防御的 Tick（防止连续防御把自己锁死）
         self.first_tick = None         # 本场第一条感知的 tick
         self.late_join = False         # 开局晚于 tick 5：开局资源大概率已被抢光
+        self.resources_ever_seen = 0   # 本场累计见过多少个资源（判断"是不是真没资源了"）
         self.deaths = 0                # 本场阵亡次数（复盘与实验统计用）
         self.mission_moves = 0         # 为完成任务主动走了几步（复盘用）
         self.patrol_moves = 0          # 空闲巡逻走了几步（复盘用）
@@ -337,7 +338,10 @@ class Agent:
                     self._last_defend_tick = self.last_tick
                     return {"action": "defend"}
             # 任务点优先于"追人"：实测镜像局里 reach 任务被追击挤掉，白丢 5 分
-            nothing_to_collect = (self.last_tick >= 60 and not self.strategy.seen_resources
+            # 只有"确实见过资源、现在一个都没有了"才算没得捡；
+            # 开局本来就没记忆，不能据此提前放弃搜索（实测会让分数掉到 3 分）。
+            nothing_to_collect = (self.resources_ever_seen > 0
+                                  and not self.strategy.seen_resources
                                   and not self._resources(data))
             go_reach_now = (self.last_tick >= self.cfg.reach_after_tick or self.late_join
                             or nothing_to_collect)
@@ -393,6 +397,8 @@ class Agent:
 
         from contestant.sim import View
         resources = self._resources(data)
+        if resources:
+            self.resources_ever_seen += len(resources)
         view = View(self.pos, resources, self.known_obstacles, self.explored, set(),
                     set(), self.last_tick, self.cfg.vision_radius)
         self.strategy.observe(view)
