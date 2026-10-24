@@ -32,8 +32,13 @@ PROMPT_TEMPLATE = """你是机器人比赛的决策助手。只依据下面的�
 - direction_reversed: 我的移动方向会被上下左右颠倒吗（布尔）
 - reversed_until_tick: 反向效果结束的 Tick（整数），没有就 null
 - affects_me: 这件事是否会影响我（布尔）
+- target_kind: 接下来这一小段时间的高层意图，**只能**取下列之一：
+  "resource"（优先去捡资源）、"mission"（优先去任务点）、
+  "engage"（主动交战）、"flee"（脱离接触、别开战）、"none"（没有偏好）
+- target_confidence: 你对 target_kind 的置信度，0 到 1 的小数
 - advice: 一句话中文建议
 公告没提到的一律 null / false / []，不要编造。坐标必须是整数。
+target_kind 必须是上面五个词之一，写别的词一律视为无效。
 """
 
 

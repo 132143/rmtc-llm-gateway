@@ -349,3 +349,66 @@ python -m contestant.eval_lab --groups guarded_hybrid,baseline_hybrid --reps 4  
 | 动作出口盲改方向（全局争格避让） | 39.02 < 39.97 |
 | 任务顺路半径 12/16 | 与 8 完全同分 |
 | 战争期只蹲地图中心 | 31.53 < 轮换热区 34.19 |
+---
+
+## 十二、第三轮：实施第 2/3/5/6 项（事件注入 / 正式节奏 / 高层意图 / 代码整洁）
+
+### 12.1 第 2 项：事件注入 + 真实模型回放（新增 contestant/events.py、contestant/llm_replay.py）
+
+规则 §8.1/§11 要求事件语义只能由大模型从自然语言里读出。离线评测台因此定了一条红线：
+**裁判侧知道真值，选手侧只能拿到公告文本**。落地方式：
+
+| 角色 | 文件 | 能看到什么 |
+|---|---|---|
+| 裁判侧 | contestant/events.py（8 类事件、§5.2 结算顺序、临时墙/治疗/易伤/无双/反伤） | 结构化真值 |
+| 选手侧 | contestant/llm_replay.py（ReplayLlmClient）+ 真实 EventUnderstanding | 只有公告文本 + **录好的真实模型输出** |
+| 录制 | scripts/record_llm_hints.py | 真机跑一次 DeepSeek，把 8 条判断写进 docs/events_cache.json |
+
+录制实测（2026-10-24，DeepSeek deepseek-chat，8/8 成功）：模型对八条公告给出了
+target_kind = none / mission / flee / flee / resource / resource / mission / mission，
+并附带 avoid_cells、danger_level、threat_zone 等字段；回放时逐条命中（hit=8、miss=1，
+miss 的那次是资格心跳，本来就没有公告）。**离线链路上第一次做到事件真的被理解并被执行。**
+
+### 12.2 事件注入立刻抓到的真 bug：临时墙被当成永久障碍
+
+| 指标 | 修复前 | 修复后 | 无事件基线 |
+|---|---|---|---|
+| 撞墙次数（12 局合计） | **451** | **220** | 19 |
+| 事件开/关的成对分差 | **−1.47** | **−0.37** | — |
+
+原因：世界分裂的十字线只存在 30 Tick，但 agent 把所有见过的障碍都写进永久集合，于是整局绕一片空地。
+修法与资源记忆同源——**障碍也按“最后看到”计时**（OBSTACLE_TTL = 40 Tick），E_OOB 推出来的地图边界单独永久保存。
+结论：事件环境现在对分数基本中性（−0.37，在噪声内），而融合版在事件环境下仍领先原版（41.98 vs 37.98）。
+
+### 12.3 第 5 项：让模型给高层意图（规则 §11.1 允许）
+
+- prompt 新增两个字段：target_kind（resource / mission / engage / flee / none）与 target_confidence；
+- 程序侧四道闸门：**白名单 → 置信度 ≥ 0.60 → 限时 40 Tick → 只影响偏好，不影响硬约束**；
+- 落地效果：flee 时即使 D 远超 500 也不为攻击让路；engage 时即使 D 近封顶也照打；
+  mission 时提前触发“去任务点”分支；未知词/低置信度/过期一律忽略并记日志。
+
+```
+llm_intent_log 示例（真实回放）：(120,'mission',0.6) (190,'flee',0.8) (240,'flee',0.6) (380,'mission',0.7)
+```
+
+### 12.4 第 6 项：参数可解释性（封存答辩用）
+
+tactics.PARAM_CONSUMPTION 把 38 个封存参数逐条标注“在哪生效”或“已注册未启用”，
+并加了一条自检测试：**参数表与 Params 字段必须一一对应**（漏一个就红）。
+标为 INACTIVE 的 8 个（pursue_max_ticks、lambda_death、t_wind_down、t_final_hold、
+heal_per_tick、fireline_on、danger_unparsed、lethal_margin）不参与任何决策，
+保留只为让“参数编号 ↔ 代码字段”对得上。
+
+### 12.5 测试与校验
+
+| 项 | 结果 |
+|---|---|
+| 单测 | 156 → **182 全绿**（新增 26 个：事件结算 8 类、回放 5、意图 5、障碍记忆 4、参数表 1、其余） |
+| 无效动作 / 异常 | 事件环境下仍为 **0 / 0** |
+| 决策 P99 | ≤1.55 ms（含事件消费与回放） |
+| 真实模型录制 | 8/8 成功，docs/events_cache.json 已入库 |
+| 正式节奏真机 | 见 12.6 |
+
+### 12.6 第 3 项：正式节奏真机（500 Tick × 500 ms，真实 DeepSeek）
+
+@@FORMAL_TABLE@

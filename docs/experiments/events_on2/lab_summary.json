@@ -1,0 +1,42 @@
+{
+ "guarded_hybrid": {
+  "runs": 12,
+  "mean": 41.98,
+  "median": 39.25,
+  "min": 31.7,
+  "max": 57.5,
+  "stdev": 7.91,
+  "mean_rank": 2.5,
+  "top2_rate": 0.333,
+  "mean_resource": 60.0,
+  "mean_damage": 526.4,
+  "mean_missions": 2.67,
+  "mean_deaths": 5.83,
+  "invalid_actions": 0,
+  "blocked_moves": 220,
+  "errors": 0,
+  "sim_errors": 0,
+  "plan_p99_ms": 1.0,
+  "mean_elapsed_s": 0.63
+ },
+ "baseline_hybrid": {
+  "runs": 12,
+  "mean": 37.98,
+  "median": 37.97,
+  "min": 28.64,
+  "max": 49.7,
+  "stdev": 5.66,
+  "mean_rank": 2.67,
+  "top2_rate": 0.333,
+  "mean_resource": 55.0,
+  "mean_damage": 494.7,
+  "mean_missions": 2.58,
+  "mean_deaths": 3.92,
+  "invalid_actions": 0,
+  "blocked_moves": 123,
+  "errors": 0,
+  "sim_errors": 0,
+  "plan_p99_ms": 0.95,
+  "mean_elapsed_s": 0.59
+ }
+}

@@ -38,6 +38,51 @@ SCORE_PER_RESOURCE_VALUE = 30.0 / STAGE2_R_FULL   # 0.25
 SCORE_PER_DAMAGE = 15.0 / STAGE2_D_FULL           # 0.03
 
 
+# 每个参数"到底在哪里生效"。封存答辩时裁判可能逐条问，这张表就是答案；
+# 标 INACTIVE 的参数在 03 号文件里登记过，但当前代码没有消费它——
+# 保留是为了让"参数编号 ↔ 代码字段"一一对应，不允许它们改变任何行为。
+PARAM_CONSUMPTION = {
+    "w_res": "planner.resource_utility",
+    "w_mis": "planner.mission_utility",
+    "w_dmg": "planner.combat_utility",
+    "w_heal": "planner.heal_utility",
+    "w_fort": "planner.fort_utility",
+    "k_tie": "planner.resource_utility",
+    "route_bonus": "planner._route_bonus",
+    "mem_forget": "agent._update_memory / planner（记忆窗口）",
+    "enemy_mem_forget": "agent._update_memory（敌车记忆窗口）",
+    "high_priority": "planner._renormalize_and_pick（P-R-05）",
+    "t_task3": "planner（任务硬截止 H6）",
+    "mission_max_distance": "agent._mission_resource_move（顺路半径）",
+    "heal_per_tick": "INACTIVE（规则只读值 10，仿真器直接按规则结算）",
+    "fort_value": "planner.fort_utility",
+    "fort_dwell": "planner.fort_utility（成本项）",
+    "fort_contested_scale": "planner.fort_utility（周围敌车 ≥2 时折价）",
+    "engage_th": "planner._combat_candidate（仅在 fused 内核生效）",
+    "flee_hp": "INACTIVE（脱战由 agent.low_hp / 防御闸门控制）",
+    "pursue_r": "planner._combat_candidate（追击，实测负收益，默认 0）",
+    "pursue_max_ticks": "INACTIVE（追击已判定无效，未接入）",
+    "p_death_base": "planner → tactics.death_probability",
+    "max_death": "planner._combat_candidate（P-C-12 阈值放宽 1.5×）",
+    "ambush_on": "agent / planner（伏击点位，默认关）",
+    "fireline_on": "INACTIVE（踩火线属裁判侧结算，选手侧不主动触发）",
+    "dry_ticks": "agent._update_memory → tactics.is_war_phase",
+    "dry_min_tick": "tactics.is_war_phase",
+    "t_wind_down": "INACTIVE（收尾期只由 reach_after_tick 与战争期控制）",
+    "t_final_hold": "INACTIVE（同上）",
+    "lambda_death": "INACTIVE（风险溢价的死亡项由 combat_utility 直接算）",
+    "danger_unparsed": "INACTIVE（未解析公告的保守避让尚未接入收益表）",
+    "lethal_margin": "INACTIVE（撤离致死区由 planner._step_is_safe 直接判格）",
+    "use_race": "planner._race_discount（消融开关）",
+    "race_strength": "planner._race_discount（折扣强度）",
+    "use_decay": "planner（记忆衰减开关）",
+    "use_route": "planner._route_bonus（消融开关）",
+    "use_contention": "planner._step_is_safe / agent._contention_detour",
+    "use_headroom": "tactics.resource_headroom / damage_headroom",
+    "tie_residual": "tactics.resource_headroom / damage_headroom",
+}
+
+
 @dataclass(frozen=True)
 class Params:
     """封存参数（03 号文件基线值）。字段注释里给编号，便于和文档逐条对照。"""

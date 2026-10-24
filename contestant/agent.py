@@ -140,7 +140,12 @@ class Agent:
         self.missions = []
         self.reach_done = False
         self.explored = set()          # 已经"看过"的格子（视野窗口覆盖过的）
-        self.known_obstacles = set()   # 见过的静态障碍（永久记住）
+        self.known_obstacles = set()   # 见过的障碍（按"最后看到"计时，见 obstacle_seen）
+        # 障碍记忆：位置 -> 最后看到它的 Tick。
+        # 事件会生成**临时**墙（世界分裂的十字线只存在 30 Tick），把它当永久障碍会让
+        # 寻路绕一整片空地（实测撞墙 19 → 451）。所以障碍也做"证伪/过期"，与资源记忆同源。
+        self.obstacle_seen = {}
+        self.boundary_obstacles = set()   # E_OOB 推出来的地图边界：永久有效
         self.transient_blocked = {}    # 临时被堵的格子 -> 过期 Tick（别的车占位会走开）
         self.last_move = None          # (出发点, 方向)：用来解释下一帧的 E_BLOCKED
         self.ai_confirmed = False      # 本场是否已经有过成功的 AI 调用（规则要求 ≥1）
@@ -177,6 +182,11 @@ class Agent:
         self.fused_actions = 0
         self.fused_reasons = {}
         self.plan_ms_max = 0.0
+        # 模型给出的"高层意图"（规则 §11.1 允许 AI 做高层决策、本地执行）。
+        # 只按白名单 + 置信度阈值采信，并且**限时**（≤40 Tick），过期自动失效。
+        self.llm_intent = "none"
+        self.llm_intent_until = -1
+        self.llm_intent_log = []
 
     # ---------- 日志 ----------
     def _log(self, level, text):
@@ -248,7 +258,9 @@ class Agent:
             if isinstance(entity, dict) and entity.get("type") == "obstacle":
                 relative = decode_relative(entity.get("position"))
                 if relative is not None and self.pos is not None:
-                    self.known_obstacles.add((self.pos[0] + relative[0], self.pos[1] + relative[1]))
+                    cell = (self.pos[0] + relative[0], self.pos[1] + relative[1])
+                    self.known_obstacles.add(cell)
+                    self.obstacle_seen[cell] = self.last_tick
 
         action = self._decide(data, me)
         if action is None:
@@ -300,6 +312,8 @@ class Agent:
         self.strategy = None
         self.explored = set()
         self.known_obstacles = set()
+        self.obstacle_seen = {}
+        self.boundary_obstacles = set()
         self.last_move = None
         self.ai_confirmed = False
         self._planner = None
@@ -311,6 +325,9 @@ class Agent:
         self.vision_seen = None
         self.fused_actions = 0
         self.fused_reasons = {}
+        self.llm_intent = "none"
+        self.llm_intent_until = -1
+        self.llm_intent_log = []
         if self.client is not None:
             from rmtc_client import EventUnderstanding
             self.understanding = EventUnderstanding(self.client, logger=self._logger)
@@ -335,6 +352,10 @@ class Agent:
         关键是"够得着"而不是"理论上还有资源"——否则 dense24 上 D 会卡在 400 出头，
         白丢 2~3 分（batchB 里 guarded 在 dense24 上 44.5 < 原版 45.6 就是这个原因）。
         """
+        if self._llm_intent_active("flee"):
+            return False                     # 模型判断"该脱离接触"：这一 Tick 不为攻击让路
+        if self._llm_intent_active("engage"):
+            return True                      # 模型判断"该打"：即使 D 已近封顶也不再让路
         if self.cfg.planner not in ("fused", "guarded"):
             return True
         score = data.get("score") if isinstance(data.get("score"), dict) else {}
@@ -396,6 +417,10 @@ class Agent:
         # 判据（P-T-02 的稳健化）：视野里还有资源就说明"没见底"，不累计干旱。
         # 原文档口径是"没有新发现的资源"，但那会把"站在同一堆资源旁边"误判成见底。
         self.dry_ticks = 0 if (fresh or visible) else self.dry_ticks + 1
+        if len(self.obstacle_seen) > 4000:      # 兜底：长期局也不会让记忆无限增长
+            keep = self.OBSTACLE_TTL * 4
+            self.obstacle_seen = {cell: seen for cell, seen in self.obstacle_seen.items()
+                                  if now - int(seen) <= keep}
 
         # 资源记忆的"证伪"：视野覆盖到的格子如果已经不显示资源，说明被别人拿走了。
         # 原版只按"自己采到"删记忆，于是会一直朝一个早就不存在的资源跑（实测抢完资源后
@@ -434,6 +459,37 @@ class Agent:
         #   2) 当前视野里确实一个资源都没有。
         self.war_phase = (tactics.is_war_phase(now, self.dry_ticks, self.cfg.params, value)
                           and self.resources_ever_seen > 0 and not visible)
+
+    # 白名单与时限：模型只能说这几个词，且判断只在有限时间内有效。
+    LLM_INTENTS = ("resource", "mission", "engage", "flee", "none")
+    LLM_INTENT_TTL = 40          # Tick；超过就自动失效，防止一条旧判断绑架整局
+    LLM_INTENT_MIN_CONF = 0.60   # P-L-11 置信度阈值
+
+    def _apply_llm_intent(self, parsed):
+        """把模型的高层意图过校验后落地（本地只负责合法性与时限）。
+
+        规则 §11.1：允许 AI 做高层决策、由本地程序执行；程序须自行校验模型输出。
+        所以这里做四件事：白名单 → 置信度阈值 → 时限 → 只影响"偏好"，不影响硬约束
+        （致死区、状态闸门、争格仍然优先于它）。
+        """
+        if not isinstance(parsed, dict):
+            return
+        kind = parsed.get("target_kind")
+        if kind not in self.LLM_INTENTS or kind == "none":
+            return
+        confidence = parsed.get("target_confidence")
+        confidence = confidence if isinstance(confidence, (int, float)) else 0.0
+        if float(confidence) < self.LLM_INTENT_MIN_CONF:
+            self._log("info", "模型意图 {0} 置信度 {1:.2f} 低于阈值，忽略".format(kind, float(confidence)))
+            return
+        self.llm_intent = kind
+        self.llm_intent_until = self.last_tick + self.LLM_INTENT_TTL
+        # 只记"意图变化"，否则同一条公告在新鲜期内每 Tick 都会写一行日志
+        if not self.llm_intent_log or self.llm_intent_log[-1][1] != kind:
+            self.llm_intent_log.append((self.last_tick, kind, round(float(confidence), 2)))
+
+    def _llm_intent_active(self, intent):
+        return self.llm_intent == intent and self.last_tick <= self.llm_intent_until
 
     def _danger_cells(self, parsed):
         """把模型输出的 avoid_cells 校验成合法格子集合（H1 用）。
@@ -608,6 +664,7 @@ class Agent:
         self._hint = hint
         if hint is not None:
             self._learn_buff(hint.get("parsed"))
+            self._apply_llm_intent(hint.get("parsed"))
         if hint is not None:
             # 先按"逐格清单"躲（世界分裂的十字线、火爆辣椒的整行整列都靠它），再退回矩形判断
             avoid = self._avoid_cells_move(hint.get("parsed"))
@@ -666,7 +723,8 @@ class Agent:
                                   and not self._resources(data))
             # 注意：晚开局**不**提前冲任务点——四席环境里晚 5~30 Tick 是常态，
             # 提前改去任务点会让整局抢不到资源（实测 rv=0、只剩 1 个任务）。
-            go_reach_now = (self.last_tick >= self.cfg.reach_after_tick or nothing_to_collect)
+            go_reach_now = (self.last_tick >= self.cfg.reach_after_tick or nothing_to_collect
+                            or self._llm_intent_active("mission"))
             if self._is_large_map() and self.last_tick < self.reach_cooldown_until:
                 pass            # 大图：刚撞不开，先按普通策略走（抢资源/打人），过会儿再来
             elif reach_pending and go_reach_now and hp > 15:
@@ -1150,7 +1208,8 @@ class Agent:
         dx, dy = DIRECTIONS.get(direction, (0, 0))
         blocked = (origin[0] + dx, origin[1] + dy)
         if error == "E_OOB":
-            # 越界是地图边界，永久有效
+            # 越界是地图边界，永久有效（不参与过期）
+            self.boundary_obstacles.add(blocked)
             self.known_obstacles.add(blocked)
         else:
             # E_BLOCKED 既可能是静态障碍，也可能是**别的车占位/争格失败**。
@@ -1173,12 +1232,17 @@ class Agent:
         """
         return self.width * self.height >= 400
 
+    OBSTACLE_TTL = 40   # Tick：这么久没再看到，就认为它可能是临时墙，先当空地处理
+
     def _blocked_now(self):
-        """当前有效的障碍集合 = 静态障碍 + 还没过期的临时堵塞。"""
+        """当前有效的障碍 = 近期见过的障碍（含临时墙） + 地图边界 + 还没过期的临时堵塞。"""
+        now = self.last_tick
         if self.transient_blocked:
             self.transient_blocked = {cell: until for cell, until in self.transient_blocked.items()
-                                      if until >= self.last_tick}
-        return self.known_obstacles | set(self.transient_blocked)
+                                      if until >= now}
+        fresh = {cell for cell, seen in self.obstacle_seen.items()
+                 if now - int(seen) <= self.OBSTACLE_TTL}
+        return fresh | self.boundary_obstacles | set(self.transient_blocked)
 
     def _mark_explored(self):
         """视野窗口覆盖过的格子就是"看过"了；不然探索会退化成原地附近乱走。"""

@@ -25,7 +25,14 @@ import sys
 import time
 
 from contestant.agent import Agent, AgentConfig
+from contestant.events import default_script
+from contestant.llm_replay import ReplayLlmClient
 from contestant.stage2_sim import Stage2Map, Stage2Simulation
+
+# 事件注入（--events）与真实模型回放（--hint-cache）由 main() 写入这两个开关，
+# 这样 run_one 不必改签名，也能让所有分组跑在"有事件"的环境里。
+EVENTS_ON = False
+HINT_CACHE = None
 
 # 单策略：每个只打开一个开关，其余全关（= "把一条思路塞进现有框架"）
 SINGLE_BASE = {"use_race": False, "use_decay": False, "use_route": False,
@@ -129,7 +136,8 @@ def make_brain(seat, spec):
     kwargs = {key: value for key, value in spec.items() if key != "kind"}
     kwargs.setdefault("decision_type", "balanced")
     cfg = AgentConfig(seat=seat, stage=2, **kwargs)
-    return Agent(cfg)
+    client = ReplayLlmClient(cache_path=HINT_CACHE) if HINT_CACHE else None
+    return Agent(cfg, client=client)
 
 
 def run_one(group_spec, env_name, opponent, seed, ticks):
@@ -137,9 +145,10 @@ def run_one(group_spec, env_name, opponent, seed, ticks):
     brains = {"A": make_brain("A", group_spec)}
     for offset, seat in enumerate(("B", "C", "D")):
         brains[seat] = make_brain(seat, OPPONENTS[opponent])
+    script = default_script(game_map) if EVENTS_ON else None
     started = time.perf_counter()
     try:
-        sim = Stage2Simulation(game_map, brains, ticks=ticks,
+        sim = Stage2Simulation(game_map, brains, ticks=ticks, events=script,
                                session_id="lab-{0}-{1}-{2}".format(env_name, opponent, seed))
         result = sim.run()
     except Exception as exc:                       # 仿真器自身异常也要记账，不能中断整批
@@ -206,7 +215,14 @@ def main(argv=None):
     parser.add_argument("--ticks", type=int, default=500)
     parser.add_argument("--out", default="docs/experiments")
     parser.add_argument("--quiet", action="store_true")
+    parser.add_argument("--events", action="store_true",
+                        help="打开事件注入（默认关：无事件环境更接近第一批实验的可比条件）")
+    parser.add_argument("--hint-cache", default=None,
+                        help="真实模型理解结果的缓存（由 scripts/record_llm_hints.py 生成）")
     args = parser.parse_args(argv)
+    global EVENTS_ON, HINT_CACHE
+    EVENTS_ON = bool(args.events)
+    HINT_CACHE = args.hint_cache
 
     groups = [name for name in (args.groups.split(",") if args.groups else []) if name] or list(GROUPS)
     envs = [name for name in (args.envs.split(",") if args.envs else []) if name] or list(ENVIRONMENTS)
