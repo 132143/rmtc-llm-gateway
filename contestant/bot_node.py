@@ -156,6 +156,8 @@ def main(argv=None):
     # 赛前调参用（封存后这些值固定；现场只允许改 decision_config.json）
     parser.add_argument("--detour", type=float,
                         default=float(os.environ.get("RMTC_DETOUR", "0")))
+    parser.add_argument("--mission-max-distance", type=int,
+                        default=int(os.environ.get("RMTC_MISSION_MAX_DIST", "0")))
     args = parser.parse_args(argv)
 
     seat = args.seat.strip().upper()[:1] or "A"
@@ -168,7 +170,8 @@ def main(argv=None):
     agent_cfg = AgentConfig(seat=seat, stage=args.stage,
                             strategy=chosen["strategy"], combat_mode=chosen["combat_mode"],
                             reach_after_tick=args.reach_after_tick,
-                            strategy_detour=args.detour)
+                            strategy_detour=args.detour,
+                            mission_max_distance=args.mission_max_distance)
     rclpy.init()
     node = RmtcBotNode(seat, args.stage, args.dry_run, agent_cfg, team_name=args.team_name)
     node.get_logger().info(

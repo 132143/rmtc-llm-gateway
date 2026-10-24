@@ -53,7 +53,7 @@ class AgentConfig:
                  defended_damage=10, low_hp=30, reach_after_tick=250,
                  vision_radius=4, strategy="greedy", combat_mode="hybrid",
                  aggressive_range=4, resource_threshold=120, finish_hp=60,
-                 ai_heartbeat_tick=3, strategy_detour=0.0):
+                 ai_heartbeat_tick=3, strategy_detour=0.0, mission_max_distance=0):
         self.seat = seat
         self.stage = stage
         self.max_hp = max_hp
@@ -72,6 +72,9 @@ class AgentConfig:
         self.ai_heartbeat_tick = ai_heartbeat_tick
         # 资源取舍：priority = 价值 / (距离 + detour)。0 = 谁近去谁；大 = 谁值钱去谁。
         self.strategy_detour = strategy_detour
+        # 任务资源只在这个距离内才专门去追；0 = 不限制（旧行为）。
+        # 大地图上"为了 5 分的任务跑去很远"会拖慢开局抢资源（24×24 实测首个资源 26 Tick 才吃到）。
+        self.mission_max_distance = mission_max_distance
 
 
 class Agent:
@@ -393,6 +396,8 @@ class Agent:
         # 已经站在目标格上：交给正常策略（这一 Tick 就会采集）
         if target == self.pos or distance == 0:
             return None
+        if self.cfg.mission_max_distance and distance > self.cfg.mission_max_distance:
+            return None      # 太远：先按普通策略就近抢，别为一个任务跑半张图
         direction = step_toward(self.pos, target, self.strategy.blocked | self.known_obstacles,
                                 self.width, self.height)
         if not direction:
