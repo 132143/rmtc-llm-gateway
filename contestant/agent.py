@@ -327,17 +327,38 @@ class Agent:
                                               detour=self.cfg.strategy_detour)
 
     def _damage_worth_attacking(self, data):
-        """对抗分在 D=500 封顶（§10.2），资源分在 R2=120 才封顶。
+        """这一 Tick 要不要为攻击放弃采集。
 
-        快打到 500 时，每多 20 点伤害只值 0.6 分；同一 Tick 去捡一个资源值 2.5 分。
-        所以封顶前进射程就打，快封顶时把 Tick 让给资源。原版没这层判断（一直打到 1200+ 伤害）。
+        §10.2：对抗分 D=500 封顶、资源分 R2=120 封顶。所以：
+          - D < 400：白白让路，照打（实测封顶感知单开会掉分，就是因为太早收手）；
+          - D ≥ 400：只有"本 Tick 真有个资源在够得着的范围内"才让路，否则继续打。
+        关键是"够得着"而不是"理论上还有资源"——否则 dense24 上 D 会卡在 400 出头，
+        白丢 2~3 分（batchB 里 guarded 在 dense24 上 44.5 < 原版 45.6 就是这个原因）。
         """
         if self.cfg.planner not in ("fused", "guarded"):
             return True
         score = data.get("score") if isinstance(data.get("score"), dict) else {}
         damage = score.get("effective_damage")
         damage = damage if isinstance(damage, (int, float)) else 0
-        return tactics.damage_headroom(damage, self.cfg.params) > 0.2
+        if tactics.damage_headroom(damage, self.cfg.params) > 0.2:
+            return True                      # D < 400：还没近封顶，照打
+        return self._reachable_resource_distance(data) is None
+
+    def _reachable_resource_distance(self, data, radius=4):
+        """最近的可采集资源步数（视野 + 记忆），超过 radius 视为"够不着"。"""
+        if self.pos is None:
+            return None
+        candidates = list(self._resources(data))
+        if self.strategy is not None:
+            candidates.extend(self.strategy.seen_resources.items())
+        best = None
+        for pos, _value in candidates:
+            distance = abs(pos[0] - self.pos[0]) + abs(pos[1] - self.pos[1])
+            if distance == 0 or distance > radius:
+                continue
+            if best is None or distance < best:
+                best = distance
+        return best
 
     # ---------- fused 内核：记忆维护与收益表调用 ----------
     def _update_memory(self, data, me):
@@ -597,6 +618,11 @@ class Agent:
                 return self._move(escape)
 
         reach_target = self._reach_target()
+        if reach_target is not None and self.pos is not None and self.pos == reach_target:
+            # 站到任务点就算完成（§10.1 到达即判定）。原版把这行写在函数末尾，
+            # 但守卫/收益表内核会在它之前 return，于是"到了还不算完成"，在目标格与相邻格
+            # 之间来回抖（实测 494-499 Tick 在一个格子上反复上下）。
+            self.reach_done = True
         reach_pending = (reach_target is not None and not self.reach_done
                          and self.pos is not None and self.pos != reach_target)
         enemies = self._enemies(data)
@@ -733,6 +759,9 @@ class Agent:
             hot = self._war_hotspot()
             direction = step_toward(self.pos, hot, self._blocked_now(), self.width, self.height)
             if direction:
+                # 巡逻也要避开"本 Tick 必被占"的格子：小图上盲目走会撞出 E_BLOCKED
+                # （实测 practice18 上 patrol 把撞墙数抬到原版的 4 倍）。
+                direction = self._contention_detour(direction)
                 self.patrol_moves += 1
                 return self._move(direction)
         if (action.get("action") == "wait" and self.cfg.stage >= 2

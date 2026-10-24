@@ -60,6 +60,11 @@ GROUPS = {
                             "param_overrides": {"use_headroom": False}},
     "guarded_no_falsify": {"kind": "ablation", "planner": "guarded",
                            "combat_mode": "opportunistic", "memory_falsify": False},
+    # 任务资源"顺路半径"标定（P-M 门限；实测低分全部来自资源类任务没完成）
+    "guarded_md12": {"kind": "combo", "planner": "guarded", "combat_mode": "hybrid",
+                     "memory_falsify": True, "mission_max_distance": 12},
+    "guarded_md16": {"kind": "combo", "planner": "guarded", "combat_mode": "hybrid",
+                     "memory_falsify": True, "mission_max_distance": 16},
     # ---- 单策略（其余关闭）-------------------------------------------
     "single_race": {"kind": "single", "planner": "fused", "combat_mode": "hybrid",
                     "param_overrides": {**DEFAULT_OVERRIDES, "use_race": True}},

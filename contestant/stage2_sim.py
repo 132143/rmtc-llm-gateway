@@ -54,6 +54,22 @@ MISSIONS = [
 ]
 
 
+def missions_for(game_map):
+    """按本场地生成任务表：reach 的坐标必须和地图中心一致。
+
+    真裁判的 missions[].position 永远与地图一致；如果仿真里写死 [12,12]，
+    18×18 的图就会出现"机器人往 [12,12] 走、裁判按中心 [9,9] 判定"的假失败。
+    """
+    out = []
+    for mission in MISSIONS:
+        item = dict(mission)
+        if item["type"] == "reach":
+            item["position"] = [game_map.reach[0], game_map.reach[1]]
+            item["text"] = "在比赛结束前至少一次到达 [{0},{1}]".format(*item["position"])
+        out.append(item)
+    return out
+
+
 # ------------------------------------------------------------------ 地图
 class Stage2Map:
     def __init__(self, width, height, obstacles, resources, spawns, reach=(12, 12)):
@@ -174,6 +190,7 @@ class Stage2Simulation:
         self.robots = {seat: RobotState(seat, game_map.spawns[seat]) for seat in brains}
         self.brains = brains
         self.remaining = dict(game_map.resources)
+        self.missions = missions_for(game_map)
         self.fort = None
         self.fort_buff = {seat: -1 for seat in brains}
         self.errors = []
@@ -222,8 +239,8 @@ class Stage2Simulation:
                 "mission_completed": len(robot.mission_ids),
                 "mission_completed_ids": list(robot.mission_ids),
             },
-            "mission_text": "；".join(m["text"] for m in MISSIONS),
-            "missions": MISSIONS,
+            "mission_text": "；".join(m["text"] for m in self.missions),
+            "missions": self.missions,
             "event_text": "",
         }
 
@@ -489,7 +506,7 @@ class Stage2Simulation:
         return direction if direction in DIRECTIONS else "right"
 
     def _check_missions(self, robot):
-        for mission in MISSIONS:
+        for mission in self.missions:
             mid = mission["id"]
             if mid in robot.mission_ids:
                 continue
