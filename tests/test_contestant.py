@@ -509,6 +509,28 @@ class TestAgent(unittest.TestCase):
         action = agent.on_perception(frame)
         self.assertEqual(action["direction"], "right")    # 就近
 
+    def test_reach_mission_beats_hunting(self):
+        """镜像局实测：追击会把 reach 任务挤掉，白丢 5 分。到点后必须优先去任务坐标。"""
+        agent = Agent(AgentConfig(seat="A", stage=2, combat_mode="hybrid",
+                                  reach_after_tick=10, low_hp=30))
+        frame = perception(tick=100, pos=(3, 3), robots=((2, 0),),
+                           missions=[{"id": "reach_target", "type": "reach", "position": [9, 9]}],
+                           hp=100)
+        action = agent.on_perception(frame)
+        self.assertEqual(action["action"], "move")
+        # 朝 (9,9) 走（右下两个方向都算对；BFS 在自己的枚举顺序里挑第一个最短步）
+        self.assertIn(action["direction"], ("right", "down"))
+        self.assertGreaterEqual(agent.reach_moves, 1)
+
+    def test_reach_mission_defers_to_defend_when_low_hp(self):
+        agent = Agent(AgentConfig(seat="A", stage=2, combat_mode="hybrid",
+                                  reach_after_tick=10, low_hp=30))
+        frame = perception(tick=100, pos=(3, 3), robots=((2, 0),),
+                           missions=[{"id": "reach_target", "type": "reach", "position": [9, 9]}],
+                           hp=20)
+        action = agent.on_perception(frame)
+        self.assertEqual(action["action"], "defend")
+
     def test_patrol_is_off_by_default(self):
         """负结果也要固定下来：巡逻实测不提分，默认关。"""
         agent = Agent(AgentConfig(seat="A", stage=2, combat_mode="hybrid"))
