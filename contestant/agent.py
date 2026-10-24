@@ -107,7 +107,8 @@ class Agent:
         self.missions = []
         self.reach_done = False
         self.explored = set()          # 已经"看过"的格子（视野窗口覆盖过的）
-        self.known_obstacles = set()   # 见过的障碍（静态，可以永久记住）
+        self.known_obstacles = set()   # 见过的静态障碍（永久记住）
+        self.transient_blocked = {}    # 临时被堵的格子 -> 过期 Tick（别的车占位会走开）
         self.last_move = None          # (出发点, 方向)：用来解释下一帧的 E_BLOCKED
         self.ai_confirmed = False      # 本场是否已经有过成功的 AI 调用（规则要求 ≥1）
         self._hint = None              # 最近一次可用的模型提示（含幻术/威胁区）
@@ -348,7 +349,7 @@ class Agent:
             go_reach_now = (self.last_tick >= self.cfg.reach_after_tick or nothing_to_collect)
             if reach_pending and go_reach_now and hp > 15:
                 direction = step_toward(self.pos, reach_target,
-                                        self.strategy.blocked | self.known_obstacles,
+                                        self._blocked_now(),
                                         self.width, self.height)
                 if direction:
                     self.reach_moves += 1
@@ -373,7 +374,7 @@ class Agent:
                 distance = abs(nearest[1][0] - self.pos[0]) + abs(nearest[1][1] - self.pos[1])
                 if 2 < distance <= self.cfg.aggressive_range and not me.get("protected"):
                     direction = step_toward(self.pos, nearest[1],
-                                            self.strategy.blocked | self.known_obstacles,
+                                            self._blocked_now(),
                                             self.width, self.height)
                     if direction:
                         return self._move(direction)
@@ -387,7 +388,7 @@ class Agent:
             target = self._best_value_target(data)
             if target is not None:
                 direction = step_toward(self.pos, target,
-                                        self.strategy.blocked | self.known_obstacles,
+                                        self._blocked_now(),
                                         self.width, self.height)
                 if direction:
                     self.opening_moves += 1
@@ -400,7 +401,7 @@ class Agent:
         resources = self._resources(data)
         if resources:
             self.resources_ever_seen += len(resources)
-        view = View(self.pos, resources, self.known_obstacles, self.explored, set(),
+        view = View(self.pos, resources, self._blocked_now(), self.explored, set(),
                     set(), self.last_tick, self.cfg.vision_radius)
         self.strategy.observe(view)
         action = self.strategy.decide(view)
@@ -420,7 +421,7 @@ class Agent:
             if direction and not me.get("protected"):
                 return {"action": "attack", "direction": direction}
             direction = step_toward(self.pos, nearest[1],
-                                    self.strategy.blocked | self.known_obstacles,
+                                    self._blocked_now(),
                                     self.width, self.height)
             if direction:
                 return self._move(direction)
@@ -480,7 +481,7 @@ class Agent:
         limit = self.cfg.mission_max_distance
         if limit and distance > limit:
             return None      # 太远：先按普通策略就近抢，别为一个任务跑半张图
-        direction = step_toward(self.pos, target, self.strategy.blocked | self.known_obstacles,
+        direction = step_toward(self.pos, target, self._blocked_now(),
                                 self.width, self.height)
         if not direction:
             return None
@@ -540,7 +541,7 @@ class Agent:
         if not inside:
             center = ((x1 + x2) // 2, (y1 + y2) // 2)
             direction = step_toward(self.pos, center,
-                                    self.strategy.blocked | self.known_obstacles,
+                                    self._blocked_now(),
                                     self.width, self.height)
             if direction:
                 self.buff_moves += 1
@@ -578,7 +579,7 @@ class Agent:
             self._patrol_index += 1
             target = points[self._patrol_index % len(points)]
         direction = step_toward(self.pos, target,
-                                self.strategy.blocked | self.known_obstacles,
+                                self._blocked_now(),
                                 self.width, self.height)
         return direction
 
@@ -624,7 +625,7 @@ class Agent:
         if target is None:
             return None
         direction = step_toward(self.pos, target,
-                                self.strategy.blocked | self.known_obstacles,
+                                self._blocked_now(),
                                 self.width, self.height)
         if direction:
             self.effects_applied += 1
@@ -643,7 +644,7 @@ class Agent:
                 nxt = (cell[0] + dx, cell[1] + dy)
                 if not (0 <= nxt[0] < max(1, self.width) and 0 <= nxt[1] < max(1, self.height)):
                     continue
-                if nxt in seen or nxt in self.known_obstacles:
+                if nxt in seen or nxt in self._blocked_now():
                     continue
                 seen.add(nxt)
                 queue.append(nxt)
@@ -691,7 +692,7 @@ class Agent:
             if not (0 <= target[0] < self.width and 0 <= target[1] < self.height):
                 continue
             direction = step_toward(self.pos, target,
-                                    self.strategy.blocked | self.known_obstacles,
+                                    self._blocked_now(),
                                     self.width, self.height)
             if direction:
                 return direction
@@ -731,15 +732,28 @@ class Agent:
             return
         if last_action.get("moved") is not False:
             return
-        if last_action.get("error") not in ("E_BLOCKED", "E_OOB"):
+        error = last_action.get("error")
+        if error not in ("E_BLOCKED", "E_OOB"):
             return
         origin, direction = attempt
         dx, dy = DIRECTIONS.get(direction, (0, 0))
         blocked = (origin[0] + dx, origin[1] + dy)
-        self.known_obstacles.add(blocked)
+        if error == "E_OOB":
+            # 越界是地图边界，永久有效
+            self.known_obstacles.add(blocked)
+        else:
+            # E_BLOCKED 既可能是静态障碍，也可能是**别的车占位/争格失败**。
+            # 当成永久障碍会让我们再也不去那一格（实测卡在任务点相邻格进不去）。
+            self.transient_blocked[blocked] = self.last_tick + 8
         if self.strategy is not None:
-            self.strategy.blocked.add(blocked)
             self.strategy.seen_resources.pop(blocked, None)
+
+    def _blocked_now(self):
+        """当前有效的障碍集合 = 静态障碍 + 还没过期的临时堵塞。"""
+        if self.transient_blocked:
+            self.transient_blocked = {cell: until for cell, until in self.transient_blocked.items()
+                                      if until >= self.last_tick}
+        return self.known_obstacles | set(self.transient_blocked)
 
     def _mark_explored(self):
         """视野窗口覆盖过的格子就是"看过"了；不然探索会退化成原地附近乱走。"""
