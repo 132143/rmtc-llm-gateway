@@ -73,6 +73,15 @@ GROUPS = {
     # 障碍记忆"永久记住"（原版行为）对照：验证临时墙过期是不是引入的副作用
     "guarded_ttl_forever": {"kind": "ablation", "planner": "guarded",
                             "combat_mode": "hybrid", "obstacle_ttl": 100000},
+    # 前段抢稀缺资源（高价值权重倍数扫描）
+    "guarded_high15": {"kind": "combo", "planner": "guarded", "combat_mode": "hybrid",
+                       "high_value_scale": 1.5},
+    "guarded_high20": {"kind": "combo", "planner": "guarded", "combat_mode": "hybrid",
+                       "high_value_scale": 2.0},
+    "guarded_high30": {"kind": "combo", "planner": "guarded", "combat_mode": "hybrid",
+                       "high_value_scale": 3.0},
+    "guarded_high20_all": {"kind": "combo", "planner": "guarded", "combat_mode": "hybrid",
+                           "high_value_scale": 2.0, "high_first_ticks": 0},
     # 任务资源"顺路半径"标定（P-M 门限；实测低分全部来自资源类任务没完成）
     "guarded_md12": {"kind": "combo", "planner": "guarded", "combat_mode": "hybrid",
                      "memory_falsify": True, "mission_max_distance": 12},

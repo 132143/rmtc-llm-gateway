@@ -107,9 +107,14 @@ class GreedyBfsStrategy(BaseStrategy):
 
     name = "greedy_bfs"
 
-    def __init__(self, width, height, detour=0.0, explore_bias="near"):
+    def __init__(self, width, height, detour=0.0, explore_bias="near",
+                 high_value_scale=1.0):
         super().__init__(width, height)
         self.detour = detour
+        # 高价值资源的权重倍数（>1 = 更愿意为它多跑几步）。
+        # 数学含义：value×scale/(dist+detour)，scale=2 时"20 分资源只要不超过普通资源
+        # 距离的 4 倍"就会胜出（默认 2 倍）。由 agent 按"还缺高价值"动态设置。
+        self.high_value_scale = float(high_value_scale)
         # 探索偏置：near = 最近的未探明格（原版）；far = 最远的未探明格。
         # 用途只在"任务缺稀缺资源、需要更快铺开视野"时临时切到 far。
         self.explore_bias = explore_bias
@@ -119,10 +124,17 @@ class GreedyBfsStrategy(BaseStrategy):
         for pos, value in view.visible_resources:
             targets[pos] = value
         if targets:
+            scale = self.high_value_scale
+
             def rank(item):
                 pos, value = item
                 dist = abs(pos[0] - view.pos[0]) + abs(pos[1] - view.pos[1])
-                return (-value / (dist + self.detour), dist)
+                weighted = value * scale if (scale != 1.0 and value >= 20) else value
+                # 分母保护：detour=0 且资源就在脚下（畸形感知里会出现）时不能除零
+                denom = dist + self.detour
+                if denom <= 0:
+                    denom = 0.5
+                return (-weighted / denom, dist)
             target, _value = sorted(targets.items(), key=rank)[0]
             direction = step_toward(view.pos, target, self.blocked | view.obstacles, self.width, self.height)
             if direction:
