@@ -81,8 +81,10 @@ class TestSimulatorAndStrategy(unittest.TestCase):
 
 class TestAgent(unittest.TestCase):
     def make_agent(self, stage=1, **cfg):
-        agent = Agent(AgentConfig(seat="A", stage=stage, **cfg))
-        return agent
+        # 这些用例专门验证"进入射程就打"的动作格式，所以固定用 opportunistic；
+        # 默认模式是 resource_first（先采集再打），它的行为有单独用例。
+        cfg.setdefault("combat_mode", "opportunistic")
+        return Agent(AgentConfig(seat="A", stage=stage, **cfg))
 
     def test_first_perception_produces_valid_action(self):
         agent = self.make_agent()
@@ -185,6 +187,33 @@ class TestAgent(unittest.TestCase):
         agent = self.make_agent(stage=2)
         action = agent.on_perception(perception(tick=3, robots=((1, 1),)))
         self.assertNotEqual(action["action"], "attack")
+
+    def test_resource_first_holds_fire_below_threshold(self):
+        agent = Agent(AgentConfig(seat="A", stage=2, combat_mode="resource_first",
+                                  resource_threshold=120))
+        frame = perception(tick=3, robots=((1, 0),))
+        frame["score"] = {"resource_value": 40, "effective_damage": 0.0,
+                          "mission_completed": 0, "invalid_actions": 0}
+        action = agent.on_perception(frame)
+        self.assertNotEqual(action["action"], "attack")
+
+    def test_resource_first_attacks_after_threshold(self):
+        agent = Agent(AgentConfig(seat="A", stage=2, combat_mode="resource_first",
+                                  resource_threshold=120))
+        frame = perception(tick=3, robots=((1, 0),))
+        frame["score"] = {"resource_value": 120, "effective_damage": 0.0,
+                          "mission_completed": 1, "invalid_actions": 0}
+        action = agent.on_perception(frame)
+        self.assertEqual(action["action"], "attack")
+        self.assertEqual(action["direction"], "right")
+
+    def test_low_hp_defends_even_before_threshold(self):
+        agent = Agent(AgentConfig(seat="A", stage=2, combat_mode="resource_first",
+                                  resource_threshold=120, low_hp=30))
+        frame = perception(tick=3, pos=(8, 8), robots=((2, 0),), hp=20)
+        frame["score"] = {"resource_value": 0}
+        action = agent.on_perception(frame)
+        self.assertEqual(action["action"], "defend")
 
     def test_snake_strategy_can_be_selected(self):
         agent = Agent(AgentConfig(seat="A", stage=1, strategy="snake"))

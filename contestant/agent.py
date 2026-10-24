@@ -38,16 +38,18 @@ class AgentConfig:
 
     strategy: "greedy"（BFS 贪心，默认）/"snake"（原骨架逻辑，用来做基线对照）
     combat_mode:
-        "never"         第二阶段也不打人（纯采集，用来验证"打人到底划不划算"）
-        "opportunistic" 只在已经进入直线 1~2 格时出手（默认）
-        "aggressive"    附近（<= aggressive_range 格）有敌人就主动靠过去
+        "never"          第二阶段也不打人（纯采集）
+        "opportunistic"  已经进入直线 1~2 格就出手
+        "resource_first" 先采集：资源价值达到 resource_threshold 之前不打人（默认）
+        "aggressive"     附近（<= aggressive_range 格）有敌人就主动靠过去
     reach_after_tick: 这个 Tick 之后才去"到达指定坐标"的任务点
+    resource_threshold: resource_first 模式的开关线（第二阶段资源分 30 分在 120 价值封顶）
     """
 
     def __init__(self, seat="A", stage=2, max_hp=100, attack_damage=20,
                  defended_damage=10, low_hp=30, reach_after_tick=250,
-                 vision_radius=4, strategy="greedy", combat_mode="opportunistic",
-                 aggressive_range=4):
+                 vision_radius=4, strategy="greedy", combat_mode="resource_first",
+                 aggressive_range=4, resource_threshold=120):
         self.seat = seat
         self.stage = stage
         self.max_hp = max_hp
@@ -59,6 +61,7 @@ class AgentConfig:
         self.strategy = strategy
         self.combat_mode = combat_mode
         self.aggressive_range = aggressive_range
+        self.resource_threshold = resource_threshold
 
 
 class Agent:
@@ -188,21 +191,32 @@ class Agent:
         enemies = self._enemies(data)
         hp = me.get("hp")
         hp = hp if isinstance(hp, (int, float)) else self.cfg.max_hp
+        if self.cfg.combat_mode == "resource_first":
+            # 资源分（30 分）在 120 价值封顶；对抗分（15 分）要 300 有效伤害。
+            # 先吃够资源再开打，比一上来对枪划算（官方裁判实测：open 图 35 → 22.5）。
+            score = data.get("score") if isinstance(data.get("score"), dict) else {}
+            value = score.get("resource_value")
+            value = value if isinstance(value, (int, float)) else 0
+            combat_allowed = value >= self.cfg.resource_threshold
+        else:
+            combat_allowed = self.cfg.combat_mode != "never"
 
         if self.cfg.stage >= 2 and self.cfg.combat_mode != "never":
-            in_range = [e for e in enemies
-                        if abs(e[1][0] - self.pos[0]) + abs(e[1][1] - self.pos[1]) <= 2]
-            if in_range:
-                target = min(in_range,
-                             key=lambda e: abs(e[1][0] - self.pos[0]) + abs(e[1][1] - self.pos[1]))
-                direction = self._line_direction(target[1])
-                if direction and not me.get("protected"):
-                    return {"action": "attack", "direction": direction}   # 直线 1~2 格才打得到
+            # 保命优先：血少且敌人近，先防（这条不受"先采集"策略影响）
             if hp <= self.cfg.low_hp and enemies:
                 nearest = min(abs(e[1][0] - self.pos[0]) + abs(e[1][1] - self.pos[1]) for e in enemies)
                 if nearest <= 3:
                     return {"action": "defend"}
-            if self.cfg.combat_mode == "aggressive" and enemies:
+            if combat_allowed:
+                in_range = [e for e in enemies
+                            if abs(e[1][0] - self.pos[0]) + abs(e[1][1] - self.pos[1]) <= 2]
+                if in_range:
+                    target = min(in_range,
+                                 key=lambda e: abs(e[1][0] - self.pos[0]) + abs(e[1][1] - self.pos[1]))
+                    direction = self._line_direction(target[1])
+                    if direction and not me.get("protected"):
+                        return {"action": "attack", "direction": direction}   # 直线 1~2 格才打得到
+            if combat_allowed and self.cfg.combat_mode == "aggressive" and enemies:
                 nearest = min(enemies, key=lambda e: abs(e[1][0] - self.pos[0]) + abs(e[1][1] - self.pos[1]))
                 distance = abs(nearest[1][0] - self.pos[0]) + abs(nearest[1][1] - self.pos[1])
                 if 2 < distance <= self.cfg.aggressive_range and not me.get("protected"):
