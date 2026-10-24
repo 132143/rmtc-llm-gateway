@@ -270,14 +270,62 @@ class TestAgent(unittest.TestCase):
 
             def hint(self, *args, **kwargs):
                 return {"parsed": {"avoid_cells": [[8, 8], [8, 7], [8, 9], [7, 8], [9, 8]],
-                                   "avoid_until_tick": 400},
-                        "advice": "十字线危险", "tick": 1, "session_id": "m1"}
+                                   "avoid_until_tick": 400, "danger_level": "fatal"},
+                        "advice": "十字线致命", "tick": 1, "session_id": "m1"}
 
         agent.understanding = FakeUnderstanding()
         action = agent.on_perception(perception(tick=10, pos=(8, 8)))
         self.assertEqual(action["action"], "move")
         self.assertIn(action["direction"], ("up", "down", "left", "right"))
         self.assertGreaterEqual(agent.effects_applied, 1)
+
+    def test_damage_level_ignored_at_full_hp(self):
+        """实测教训：为躲 30 HP 的辣椒线反复横跳，会被对手抢光资源（45 → 32.5）。"""
+        agent = self.make_agent(stage=2)
+
+        class FakeUnderstanding:
+            def offer(self, *args, **kwargs):
+                return True
+
+            def hint(self, *args, **kwargs):
+                return {"parsed": {"avoid_cells": [[8, 8]], "avoid_until_tick": 400,
+                                   "danger_level": "damage"},
+                        "advice": "掉血", "tick": 1, "session_id": "m1"}
+
+        agent.understanding = FakeUnderstanding()
+        action = agent.on_perception(perception(tick=10, pos=(8, 8), resources=(((0, -2), 10),), hp=100))
+        self.assertEqual(action["direction"], "up")      # 血满：照常捡资源
+
+    def test_damage_level_dodged_when_hp_low(self):
+        agent = self.make_agent(stage=2)
+
+        class FakeUnderstanding:
+            def offer(self, *args, **kwargs):
+                return True
+
+            def hint(self, *args, **kwargs):
+                return {"parsed": {"avoid_cells": [[8, 8]], "avoid_until_tick": 400,
+                                   "danger_level": "damage"},
+                        "advice": "掉血", "tick": 1, "session_id": "m1"}
+
+        agent.understanding = FakeUnderstanding()
+        action = agent.on_perception(perception(tick=10, pos=(8, 8), hp=40))
+        self.assertEqual(action["action"], "move")
+
+    def test_missing_danger_level_ignored(self):
+        agent = self.make_agent(stage=2)
+
+        class FakeUnderstanding:
+            def offer(self, *args, **kwargs):
+                return True
+
+            def hint(self, *args, **kwargs):
+                return {"parsed": {"avoid_cells": [[8, 8]], "avoid_until_tick": 400},
+                        "advice": "没说危险等级", "tick": 1, "session_id": "m1"}
+
+        agent.understanding = FakeUnderstanding()
+        action = agent.on_perception(perception(tick=10, pos=(8, 8), resources=(((2, 0), 10),)))
+        self.assertEqual(action["direction"], "right")
 
     def test_avoid_cells_ignored_when_outside(self):
         agent = self.make_agent(stage=2)

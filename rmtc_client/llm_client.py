@@ -27,9 +27,9 @@ _BACKOFF_CODES = {"rate_limit", "concurrency_limit", "audit_unavailable",
 class ClientConfig:
     url: str = "http://127.0.0.1:8080/v1/chat/completions"
     token: str = "practice-A"
-    # 真实模型（DeepSeek）实测：中位 0.9s、p90 1.1s、最大 1.4s。
-    # 500 ms/Tick 的节奏下 2.5 s 只占 5 个 Tick，且调用是异步的，不会堵动作窗。
-    timeout_s: float = 2.5
+    # 真实模型实测延迟：中位 1.0~1.3s，最大 2.7s。超时先设 4s：调用是异步的，
+    # 不会堵动作窗；而超时会白吃额度（规则 §11.3），所以宁可多等。
+    timeout_s: float = 4.0
     min_interval_s: float = 2.0   # 两次调用之间的最小间隔
     # 本地预算：规则 §11.3「暂定每席位令牌成功调用上限 100」。
     # 留出余量（心跳+事件都在里面），默认 60，别把额度一次性烧光。
@@ -89,7 +89,8 @@ class LlmGatewayClient:
         self._next_allowed = 0.0
         self._attempts = 0
         self._ok_calls = 0
-        self._in_flight = 0            # 已放行、还没回来的请求（算进预算，避免超额）
+        self._in_flight = 0            # 已放行、还没回来的请求
+        self._spent = 0                 # 已占用的额度（按发出的请求计，超时也算）
         self._last_code = ""
 
     # ---------- 对外状态 ----------
@@ -116,7 +117,7 @@ class LlmGatewayClient:
     def stats(self) -> dict:
         with self._lock:
             return {"attempts": self._attempts, "ok_calls": self._ok_calls,
-                    "in_flight": self._in_flight,
+                    "in_flight": self._in_flight, "spent": self._spent,
                     "degraded": self._degraded, "last_code": self._last_code}
 
     def _log(self, level: str, text: str) -> None:
@@ -136,11 +137,14 @@ class LlmGatewayClient:
         with self._lock:
             if self._degraded:
                 return False, self._degraded
-            if self.cfg.max_calls and (self._ok_calls + self._in_flight) >= self.cfg.max_calls:
+            # 保守口径：额度按"请求是否发出"占，而不是按"是否成功"。
+            # 规则 §11.3 明确：成功响应即消耗额度，客户端超时也不退回——超时同样吃配额。
+            if self.cfg.max_calls and self._spent >= self.cfg.max_calls:
                 return False, "budget"
             if time.monotonic() < self._next_allowed:
                 return False, "cooldown"
             self._in_flight += 1
+            self._spent += 1
             self._next_allowed = time.monotonic() + self.cfg.min_interval_s
             self._attempts += 1
             return True, ""

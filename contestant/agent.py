@@ -98,6 +98,7 @@ class Agent:
         self.ai_confirmed = False      # 本场是否已经有过成功的 AI 调用（规则要求 ≥1）
         self._hint = None              # 最近一次可用的模型提示（含幻术/威胁区）
         self.effects_applied = 0       # 按模型提示改过几次动作（复盘用）
+        self._last_hp = None           # 上一帧血量（判断"要不要为躲伤害分心"）
         self.mission_moves = 0         # 为完成任务主动走了几步（复盘用）
         self.stats = {"perceptions": 0, "actions": 0, "skipped": 0}
 
@@ -262,6 +263,7 @@ class Agent:
         enemies = self._enemies(data)
         hp = me.get("hp")
         hp = hp if isinstance(hp, (int, float)) else self.cfg.max_hp
+        self._last_hp = hp
         if self.cfg.combat_mode == "finish":
             combat_allowed = True      # 出手门槛由"敌人血量"控制（见下）
         elif self.cfg.combat_mode == "resource_first":
@@ -411,6 +413,16 @@ class Agent:
             return None
         until = parsed.get("avoid_until_tick")
         if isinstance(until, (int, float)) and self.last_tick > int(until):
+            return None
+        # 危险等级：fatal 必躲；damage 只在血少时躲；none/缺失不躲。
+        # 实测教训：为了躲 30 HP 的辣椒线反复横跳，会被对手抢光资源（一局从 45 掉到 32.5）。
+        level = parsed.get("danger_level")
+        hp = self._last_hp
+        if level == "fatal":
+            pass
+        elif level == "damage" and isinstance(hp, (int, float)) and hp <= 60:
+            pass
+        else:
             return None
         blocked = set()
         for cell in cells[:80]:

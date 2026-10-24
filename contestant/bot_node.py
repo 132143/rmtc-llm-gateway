@@ -68,7 +68,7 @@ class RmtcBotNode(Node):
                 url=os.environ.get("RMTC_AI_URL",
                                    "http://127.0.0.1:8080/v1/chat/completions"),
                 token=os.environ.get("RMTC_TEAM_TOKEN", f"practice-{seat}"),
-                timeout_s=1.5, min_interval_s=2.0),
+                timeout_s=4.0, min_interval_s=2.0),
             logger=lambda level, text: self.get_logger().info(f"[ai:{level}] {text}"))
         cfg = agent_cfg or AgentConfig(seat=seat, stage=stage)
         self.agent = Agent(cfg, client=client,

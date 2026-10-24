@@ -200,3 +200,31 @@ curl -s -X POST http://127.0.0.1:8080/api/resume -H 'Content-Type: application/j
 **规范**：任何"真机验证"与"跑批实验"不能并行；验证脚本开头的 `pkill` 只应在确认没有批次在跑时执行。
 判断方法：先看 `ps aux | grep -E 'stage2_ab2|practice.py' | grep -v grep` 是否为空，
 再决定要不要 `pkill`。批次脚本本身有 `flock`，但 `pkill` 不受它保护。
+
+
+## 十五、上 GitHub 找过什么、用了什么（2026-10-23 深夜）
+
+先查有没有能直接用的现成方案，结论是**没有可用的"RMTC 机器人"项目**：
+
+| 查到的东西 | 结论 |
+|---|---|
+| RoboMaster AI Challenge 系列（`LoveThinkinghard/RoboMaster-AI-Challenge-Simulator-2D` 等） | 2018–2019 的 C++/RL 仿真，接口与本赛完全不同，**不可用** |
+| `brean/python-pathfinding`（MIT，380★） | 网格 A*/Dijkstra。我们的 BFS 在**等代价网格上已经最优**，引入只增加依赖风险 → 不引入 |
+| `openai/openai-python`（Apache-2.0） | 官方客户端，23MB。比赛机要离线可跑，自己写的 urllib 客户端只有 200 行 → 只借它的错误分类思路 |
+| `jd/tenacity`（Apache-2.0，8.8k★） | 重试库。借了"**抖动退避**"思路（多队共享网关时固定退避会撞车），自己实现 3 行 |
+| `ndcorder/outputguard`（MIT） | LLM 结构化输出的 **13 种 JSON 修复策略**。直接借思路，自己写了 `repair_json_object`（单引号/注释/尾逗号/Python 字面量/截断补全） |
+
+**原则**：比赛机要离线、要可复现、要能被裁判审查，所以能借"思路"就不加"依赖"。
+最终 `contestant/`+`rmtc_client/` 仍然只有标准库依赖。
+
+## 十六、踩坑：练习配置校验很严格
+
+改事件日程想压测，第一次直接失败：
+
+```text
+{"error": "练习配置无效：events.schedule must contain configured announcement_count entries"}
+```
+
+`announcement_count` 必须**等于** `schedule` 的条数，写大了整局都不会部署，
+而且失败后程序会继续跑在上一局残留的场次里——**看起来有分数、其实是假数据**。
+以后凡是改练习配置，第一步先看 `/api/start` 的返回是不是 `{"ok": true, ...}`。
