@@ -27,6 +27,8 @@ PROMPT_TEMPLATE = """你是机器人比赛的决策助手。只依据下面的�
 - danger_level: 这些格子的危险程度，只能是 "fatal"（直接死亡/世界分裂）、"damage"（掉血）或 "none"
 - threat_zone: 危险区域的矩形 [[x1,y1],[x2,y2]]（能给就给），没有就 null
 - heal_zone: 能回血的矩形或点位 [[x1,y1],[x2,y2]]，没有就 null
+- buff_zone: 能给我增益的矩形 [[x1,y1],[x2,y2]]（例如"天下无双"堡垒、需要停留/进入的点位），没有就 null
+- buff_until_tick: 这个增益区域存在到哪个 Tick（整数），没有就 null
 - direction_reversed: 我的移动方向会被上下左右颠倒吗（布尔）
 - reversed_until_tick: 反向效果结束的 Tick（整数），没有就 null
 - affects_me: 这件事是否会影响我（布尔）
