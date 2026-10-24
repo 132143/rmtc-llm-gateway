@@ -1,0 +1,223 @@
+{
+  "stage": 1,
+  "vision_radius": 4,
+  "respawn_wait": 3,
+  "spawn_protection": 2,
+  "mission_text": "练习采集：自主收集资源。",
+  "robots": [
+    {
+      "team": "A",
+      "spawn": [
+        1,
+        1
+      ]
+    }
+  ],
+  "missions": [],
+  "map": {
+    "width": 24,
+    "height": 24,
+    "obstacles": [
+      [
+        8,
+        15
+      ],
+      [
+        5,
+        3
+      ],
+      [
+        13,
+        6
+      ],
+      [
+        2,
+        6
+      ],
+      [
+        6,
+        2
+      ],
+      [
+        1,
+        8
+      ],
+      [
+        5,
+        19
+      ],
+      [
+        14,
+        18
+      ],
+      [
+        5,
+        5
+      ],
+      [
+        15,
+        6
+      ],
+      [
+        5,
+        11
+      ],
+      [
+        7,
+        5
+      ],
+      [
+        17,
+        1
+      ],
+      [
+        6,
+        9
+      ],
+      [
+        4,
+        19
+      ],
+      [
+        21,
+        8
+      ]
+    ],
+    "resources": [
+      {
+        "id": "big24_0",
+        "position": [
+          0,
+          9
+        ],
+        "value": 10
+      },
+      {
+        "id": "big24_1",
+        "position": [
+          8,
+          18
+        ],
+        "value": 10
+      },
+      {
+        "id": "big24_2",
+        "position": [
+          12,
+          2
+        ],
+        "value": 10
+      },
+      {
+        "id": "big24_3",
+        "position": [
+          8,
+          21
+        ],
+        "value": 10
+      },
+      {
+        "id": "big24_4",
+        "position": [
+          22,
+          8
+        ],
+        "value": 10
+      },
+      {
+        "id": "big24_5",
+        "position": [
+          12,
+          4
+        ],
+        "value": 10
+      },
+      {
+        "id": "big24_6",
+        "position": [
+          21,
+          11
+        ],
+        "value": 10
+      },
+      {
+        "id": "big24_7",
+        "position": [
+          0,
+          6
+        ],
+        "value": 10
+      },
+      {
+        "id": "big24_8",
+        "position": [
+          13,
+          5
+        ],
+        "value": 10
+      },
+      {
+        "id": "big24_9",
+        "position": [
+          20,
+          12
+        ],
+        "value": 10
+      },
+      {
+        "id": "big24_10",
+        "position": [
+          13,
+          8
+        ],
+        "value": 10
+      },
+      {
+        "id": "big24_11",
+        "position": [
+          13,
+          4
+        ],
+        "value": 10
+      },
+      {
+        "id": "big24_12",
+        "position": [
+          16,
+          4
+        ],
+        "value": 20
+      },
+      {
+        "id": "big24_13",
+        "position": [
+          16,
+          22
+        ],
+        "value": 20
+      },
+      {
+        "id": "big24_14",
+        "position": [
+          4,
+          9
+        ],
+        "value": 20
+      },
+      {
+        "id": "big24_15",
+        "position": [
+          3,
+          4
+        ],
+        "value": 20
+      }
+    ]
+  },
+  "events": {
+    "enabled": false,
+    "max_hp": 100,
+    "base_attack_damage": 20,
+    "base_defended_damage": 10
+  }
+}
