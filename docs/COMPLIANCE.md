@@ -220,3 +220,18 @@ export RMTC_TEAM_NAME='<队名>'
 2. 第二阶段"资源被抢光后"的行为只做了"追最近的敌人"，没考虑对方血量/保护期/我方 HP。
 3. 事件理解只用了 `threat_zone` 一个字段；其他事件（幻术反向、易伤倍率、堡垒 5×5 攻击）没有建模。
 4. 对抗/采集的权重只在 official 图跑过 1 局/模式，样本偏少。
+
+
+---
+
+## 6. 本轮修复的真机验证（官方练习裁判，2026-10-23 深夜）
+
+| 验证项 | 操作 | 结果 |
+|---|---|---|
+| `decision_config.json` 生效 | `{"decision_type":"collect"}` → 启动 stage 1 | 日志：`决策类型：collect（decision_type=collect）→ strategy=greedy, combat=never；队伍名 队伍A`；第一阶段仍 **40.0/40，资源 200/200，非法动作 0** |
+| 注册话题发布者 | `ros2 topic info /team_A/registration` | `Publisher count: 1`（RELIABLE + TRANSIENT_LOCAL，每 5 秒重发） |
+| **AI 资格心跳**（最关键） | `events.enabled=false` 的第二阶段配置 → `event_text` 长度为 0 | 裁判侧 `ai.A.success_count = 1`、`attempt_count = 1` —— **没有事件也能拿到本场 AI 资格**，任务分不会再被清零 |
+| 无事件场次的成绩 | 同上（无陪练） | A 队 **55.0 / 60**（资源 30 + 对抗 + 任务 15） |
+| 决策轨迹 | `RMTC_TRACE` | 100 Tick 一局写出 101 行 jsonl |
+
+复现脚本：`scripts/vm/`（`verify_*` 两个脚本在宿主机工作区，逻辑与这里描述一致）。
