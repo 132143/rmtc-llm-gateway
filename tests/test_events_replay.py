@@ -252,6 +252,27 @@ class TestObstacleMemory(unittest.TestCase):
         self.assertIn((0, -1), agent.boundary_obstacles)
 
 
+class TestSealedDefaults(unittest.TestCase):
+    """封存默认值护栏：任何一次"手滑改默认"都要立刻红。
+
+    每一项默认值都有实测依据（见 docs/FUSION_REPORT.md 第五、十三、十五、十六节）。
+    """
+
+    def test_sealed_defaults(self):
+        cfg = AgentConfig()
+        self.assertEqual(cfg.planner, "guarded")        # 收益表内核未超过它，所以默认不用 fused
+        self.assertEqual(cfg.combat_mode, "hybrid")
+        self.assertTrue(cfg.mission_portfolio)          # 任务组合约束：95 局/组方向为正
+        self.assertFalse(cfg.race_guard)                # 96 局/组无收益 → 关
+        self.assertFalse(cfg.patrol_skip_reached)       # 显著更差（−0.52, p=0.009）→ 关
+        self.assertFalse(cfg.late_cap_guard)            # 完全惰性 → 关
+        self.assertEqual(cfg.early_quiet, 0)            # 低分概率翻倍 → 关
+        self.assertEqual(cfg.obstacle_ttl, 40)          # 临时墙要能过期
+        self.assertEqual(cfg.mission_max_distance, 8)   # 8/12/16 同分，取小
+        self.assertEqual(cfg.high_value_scale, 1.0)     # 5 档同分 → 不放大
+        self.assertEqual(cfg.ai_heartbeat_tick, 3)      # AI 资格兜底
+
+
 class TestRaceGuard(unittest.TestCase):
     """资源争抢评估：对手更近且正朝资源去 → 放弃；对手明显更弱且够得着 → 留下阻击。
 
