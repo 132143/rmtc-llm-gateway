@@ -231,6 +231,15 @@ class TestAgent(unittest.TestCase):
         self.assertEqual(lines[0]["tick"], 0)
         self.assertIn(lines[0]["action"], ("move", "attack", "defend", "wait"))
 
+    def test_hybrid_hunts_instead_of_waiting(self):
+        """真机实测：资源被对手抢完后，程序原地 wait 了 415 Tick。hybrid 应该改为去压制对手。"""
+        agent = Agent(AgentConfig(seat="A", stage=2, combat_mode="hybrid"))
+        agent.on_perception(perception(tick=0, pos=(13, 13)))     # 先建立场次与地图
+        agent.explored = {(x, y) for x in range(18) for y in range(18)}   # 全图已探索
+        action = agent.on_perception(perception(tick=1, pos=(13, 13), robots=((3, 1),)))
+        self.assertEqual(action["action"], "move")
+        self.assertIn(action["direction"], ("right", "down"))
+
     def test_finish_mode_only_attacks_weak_enemy(self):
         agent = Agent(AgentConfig(seat="A", stage=2, combat_mode="finish", finish_hp=60))
         healthy = perception(tick=3, robots=((1, 0),))

@@ -43,6 +43,7 @@ class AgentConfig:
         "resource_first" 先采集：资源价值达到 resource_threshold 之前不打人
                         （实测在资源被堵的图上更差，只作为对照保留）
         "finish"         只在能补刀时出手（视野内敌人血量 <= finish_hp 且已进入直线射程）
+        "hybrid"        顺路就打；没有资源可捡时改为主动找人（不空转等比赛结束）
         "aggressive"     附近（<= aggressive_range 格）有敌人就主动靠过去
     reach_after_tick: 这个 Tick 之后才去"到达指定坐标"的任务点
     resource_threshold: resource_first 模式的开关线（第二阶段资源分 30 分在 120 价值封顶）
@@ -280,6 +281,18 @@ class Agent:
                     set(), self.last_tick, self.cfg.vision_radius)
         self.strategy.observe(view)
         action = self.strategy.decide(view)
+        if (action.get("action") == "wait" and self.cfg.stage >= 2
+                and self.cfg.combat_mode == "hybrid" and enemies):
+            # 资源已经抢完/看不见了：与其原地等到结束，不如去压制对手（可能抢到资源、也有伤害分）
+            nearest = min(enemies, key=lambda e: abs(e[1][0] - self.pos[0]) + abs(e[1][1] - self.pos[1]))
+            direction = self._line_direction(nearest[1])
+            if direction and not me.get("protected"):
+                return {"action": "attack", "direction": direction}
+            direction = step_toward(self.pos, nearest[1],
+                                    self.strategy.blocked | self.known_obstacles,
+                                    self.width, self.height)
+            if direction:
+                return self._move(direction)
         if action.get("action") not in ATTACK_ACTIONS:
             return {"action": "wait"}
         if action.get("action") == "move":

@@ -356,6 +356,12 @@ class TestUpstream(GatewayCase):
             status, body = self.post(self.chat())
             self.assertEqual(status, 504)
             self.assertEqual(body["error"]["code"], "upstream_timeout")
+            # 响应是先写回给客户端的，记账清理在 finally 里——给服务端线程一点时间收尾
+            for _ in range(50):
+                if (self.state.tokens["practice-A"].pending == 0
+                        and self.state.tokens["practice-A"].inflight == 0):
+                    break
+                time.sleep(0.02)
             self.assertEqual(self.state.tokens["practice-A"].used, 0)
             self.assertEqual(self.state.tokens["practice-A"].pending, 0)
             self.assertEqual(self.state.tokens["practice-A"].inflight, 0)
@@ -370,13 +376,18 @@ class TestUpstream(GatewayCase):
 
 class TestAudit(GatewayCase):
     def test_audit_records_seat_but_never_token(self):
-        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "audit-test.jsonl")
-        if os.path.exists(path):
-            os.remove(path)
+        # 用带时间戳的唯一文件名：曾经因为在全量跑时复用了同一个 audit-test.jsonl 而偶发失败
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            f"audit-test-{os.getpid()}-{time.time_ns()}.jsonl")
         self.addCleanup(lambda: os.path.exists(path) and os.remove(path))
         self.start(audit_path=path)
         self.post(self.chat())
         self.post(self.chat(), token="bogus")
+        # 审计记录在响应之后才落盘（服务端在 finally 里写），所以要等它写完再断言
+        for _ in range(100):
+            if os.path.exists(path) and len([l for l in open(path, encoding="utf-8") if l.strip()]) >= 2:
+                break
+            time.sleep(0.02)
         with open(path, encoding="utf-8") as handle:
             text = handle.read()
         self.assertNotIn("practice-A", text)

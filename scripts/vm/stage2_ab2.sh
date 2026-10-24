@@ -18,11 +18,42 @@ echo "mode,config,rep,score,resource_value,damage,missions,hp" >> "$CSV"
 
 start_referee() {
   pkill -f practice.py 2>/dev/null
-  sleep 1
+  # 必须等端口真的空出来，否则会连到"上一局的旧裁判"，读到 finished=True 直接空跑（踩过 2.5 分钟跑完 500 Tick 的坑）
+  for i in $(seq 1 20); do
+    curl -s -m 1 http://127.0.0.1:8080/api/state > /dev/null 2>&1 || break
+    sleep 1
+  done
   ( cd ~/rmtc_practice && nohup ./start_referee.sh --stage 2 > /tmp/ref_ab2.log 2>&1 & )
   for i in $(seq 1 25); do
     curl -s -m 1 http://127.0.0.1:8080/api/state > /dev/null 2>&1 && return 0
     sleep 1
+  done
+  return 1
+}
+
+# 开局后校验：真的新开了场次、真的没结束，否则重试一次
+ensure_started() {
+  local body="$1"
+  for attempt in 1 2; do
+    local sid
+    sid=$(curl -s -X POST http://127.0.0.1:8080/api/start -H 'Content-Type: application/json' -d "$body" \
+          | python3 -c "import json,sys;print(json.load(sys.stdin).get('session_id',''))" 2>/dev/null)
+    local state
+    state=$(curl -s http://127.0.0.1:8080/api/state)
+    local ok
+    ok=$(echo "$state" | python3 -c "
+import json,sys
+s=json.load(sys.stdin)
+print('ok' if (s['status']['finished'] is False and s['status']['tick'] < 5) else 'stale')
+" 2>/dev/null)
+    if [ "$ok" = "ok" ]; then
+      curl -s -X POST http://127.0.0.1:8080/api/resume -H 'Content-Type: application/json' -d '{}' > /dev/null
+      echo "$sid"
+      return 0
+    fi
+    echo "start 校验失败（attempt $attempt）：读到旧场次，重来" >&2
+    start_referee || return 1
+    sleep 2
   done
   return 1
 }
@@ -52,8 +83,7 @@ import json
 print(json.dumps({'stage': 2, 'tick_ms': $TICKMS, 'max_ticks': $TICKS,
                   'bots': ['B','C','D'], 'config': json.load(open('$CFG'))}))
 ")
-      curl -s -X POST http://127.0.0.1:8080/api/start -H 'Content-Type: application/json' -d "$BODY" > /dev/null
-      curl -s -X POST http://127.0.0.1:8080/api/resume -H 'Content-Type: application/json' -d '{}' > /dev/null
+      ensure_started "$BODY" > /dev/null || { echo "开局失败，跳过 $MODE/$NAME"; continue; }
       for i in $(seq 1 60); do
         sleep 1
         FIN=$(curl -s -m 2 http://127.0.0.1:8080/api/state | python3 -c "import json,sys;print(json.load(sys.stdin)['status']['finished'])" 2>/dev/null)
