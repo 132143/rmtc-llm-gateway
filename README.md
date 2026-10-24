@@ -430,6 +430,9 @@ cd ~/rmtc-llm-gateway && python3 run_tests.py
 
 ## 11. 交接与移植（给队友）
 
+**先读根目录的 [HANDOVER.md](HANDOVER.md)** —— 完整交接文档：当前状态、比赛方案、参数表、
+成绩与实验证据、踩过的坑与"不要再试"清单、提交材料、合并规范、下一步。
+
 | 文档 | 用途 |
 |---|---|
 | [docs/HANDOVER_FOR_TEAMMATE.md](docs/HANDOVER_FOR_TEAMMATE.md) | **给队友（和他的 LLM）**：目录分工、不能破的协议清单、已验证结论、合并规范 |
