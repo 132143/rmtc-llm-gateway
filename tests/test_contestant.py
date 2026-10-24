@@ -260,6 +260,55 @@ class TestAgent(unittest.TestCase):
         agent.on_perception(perception(tick=3))          # 到点亮心跳
         self.assertEqual(offers, ["__heartbeat__"])
 
+    def test_avoid_cells_makes_robot_leave_danger(self):
+        """世界分裂/火爆辣椒是"整行整列"，模型会列出格子；本车在里面时必须先走开。"""
+        agent = self.make_agent(stage=2)
+
+        class FakeUnderstanding:
+            def offer(self, *args, **kwargs):
+                return True
+
+            def hint(self, *args, **kwargs):
+                return {"parsed": {"avoid_cells": [[8, 8], [8, 7], [8, 9], [7, 8], [9, 8]],
+                                   "avoid_until_tick": 400},
+                        "advice": "十字线危险", "tick": 1, "session_id": "m1"}
+
+        agent.understanding = FakeUnderstanding()
+        action = agent.on_perception(perception(tick=10, pos=(8, 8)))
+        self.assertEqual(action["action"], "move")
+        self.assertIn(action["direction"], ("up", "down", "left", "right"))
+        self.assertGreaterEqual(agent.effects_applied, 1)
+
+    def test_avoid_cells_ignored_when_outside(self):
+        agent = self.make_agent(stage=2)
+
+        class FakeUnderstanding:
+            def offer(self, *args, **kwargs):
+                return True
+
+            def hint(self, *args, **kwargs):
+                return {"parsed": {"avoid_cells": [[2, 2]], "avoid_until_tick": 400},
+                        "advice": "不在危险区", "tick": 1, "session_id": "m1"}
+
+        agent.understanding = FakeUnderstanding()
+        action = agent.on_perception(perception(tick=10, pos=(8, 8), resources=(((0, -2), 10),)))
+        self.assertEqual(action["direction"], "up")     # 正常去捡资源
+
+    def test_expired_avoid_cells_ignored(self):
+        agent = self.make_agent(stage=2)
+
+        class FakeUnderstanding:
+            def offer(self, *args, **kwargs):
+                return True
+
+            def hint(self, *args, **kwargs):
+                return {"parsed": {"avoid_cells": [[8, 8]], "avoid_until_tick": 5},
+                        "advice": "已过期", "tick": 1, "session_id": "m1"}
+
+        agent.understanding = FakeUnderstanding()
+        action = agent.on_perception(perception(tick=10, pos=(8, 8), resources=(((2, 0), 10),)))
+        self.assertEqual(action["direction"], "right")
+
     def test_unfinished_high_value_mission_is_chased(self):
         """任务"至少 1 个高价值资源"值 5 分；没完成时要优先去高价值资源，而不是最近的普通资源。"""
         agent = self.make_agent(stage=2)

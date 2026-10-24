@@ -21,13 +21,16 @@ PROMPT_TEMPLATE = """你是机器人比赛的决策助手。只依据下面的�
 公告：{event}
 
 只输出一个 JSON 对象（不要代码块、不要解释），字段含义：
-- threat_zone: 会扣血/致死/危险的矩形 [[x1,y1],[x2,y2]]，没有就 null
+- avoid_cells: **接下来必须避开的格子**，最多 60 个，形如 [[x,y],...]；没有就 []。
+  整行/整列/十字形的危险，请把那条线上的格子逐个列出来（地图 18x18，x/y 都会在 0..17）；
+- avoid_until_tick: 上面这些格子危险到哪个 Tick 结束（整数），不确定就给公告里的结束 Tick，没有就 null
+- threat_zone: 危险区域的矩形 [[x1,y1],[x2,y2]]（能给就给），没有就 null
 - heal_zone: 能回血的矩形或点位 [[x1,y1],[x2,y2]]，没有就 null
 - direction_reversed: 我的移动方向会被上下左右颠倒吗（布尔）
 - reversed_until_tick: 反向效果结束的 Tick（整数），没有就 null
 - affects_me: 这件事是否会影响我（布尔）
 - advice: 一句话中文建议
-公告没提到的一律 null / false，不要编造。坐标必须是整数。
+公告没提到的一律 null / false / []，不要编造。坐标必须是整数。
 """
 
 

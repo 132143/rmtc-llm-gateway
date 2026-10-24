@@ -184,6 +184,9 @@ class Agent:
             "action": payload.get("action"),
             "direction": payload.get("direction"),
             "combat": self.cfg.combat_mode,
+            "ai_confirmed": self.ai_confirmed,
+            "effects": self.effects_applied,
+            "mission_moves": self.mission_moves,
         }
         try:
             import json
@@ -248,6 +251,10 @@ class Agent:
         hint = self.understanding.hint(self.session_id, self.last_tick) if self.understanding else None
         self._hint = hint
         if hint is not None:
+            # 先按"逐格清单"躲（世界分裂的十字线、火爆辣椒的整行整列都靠它），再退回矩形判断
+            avoid = self._avoid_cells_move(hint.get("parsed"))
+            if avoid:
+                return self._move(avoid)
             escape = self._threat_escape(hint.get("parsed"))
             if escape:
                 return self._move(escape)
@@ -390,6 +397,60 @@ class Agent:
             return None
         self.mission_moves += 1
         return self._move(direction)
+
+    def _avoid_cells_move(self, parsed):
+        """模型给"要避开的格子"时，如果本车正好在里面，就走到最近的格子外。
+
+        世界分裂（整行整列即时击杀）、火爆辣椒（整行整列火焰）用矩形描述不准确，
+        所以让模型直接列格子，这里只做"我在不在里面 / 往哪走一步"两件事。
+        """
+        if not isinstance(parsed, dict) or self.pos is None:
+            return None
+        cells = parsed.get("avoid_cells")
+        if not isinstance(cells, list) or not cells:
+            return None
+        until = parsed.get("avoid_until_tick")
+        if isinstance(until, (int, float)) and self.last_tick > int(until):
+            return None
+        blocked = set()
+        for cell in cells[:80]:
+            if isinstance(cell, (list, tuple)) and len(cell) == 2:
+                try:
+                    x, y = int(cell[0]), int(cell[1])
+                except (TypeError, ValueError):
+                    continue
+                if 0 <= x < max(1, self.width) and 0 <= y < max(1, self.height):
+                    blocked.add((x, y))
+        if self.pos not in blocked:
+            return None
+        target = self._nearest_safe_cell(blocked)
+        if target is None:
+            return None
+        direction = step_toward(self.pos, target,
+                                self.strategy.blocked | self.known_obstacles,
+                                self.width, self.height)
+        if direction:
+            self.effects_applied += 1
+        return direction
+
+    def _nearest_safe_cell(self, blocked):
+        """BFS 找最近的、不在危险清单里的可走格（只用于下一步方向）。"""
+        from collections import deque
+        queue = deque([self.pos])
+        seen = {self.pos}
+        while queue:
+            cell = queue.popleft()
+            if cell != self.pos and cell not in blocked:
+                return cell
+            for dx, dy in DIRECTIONS.values():
+                nxt = (cell[0] + dx, cell[1] + dy)
+                if not (0 <= nxt[0] < max(1, self.width) and 0 <= nxt[1] < max(1, self.height)):
+                    continue
+                if nxt in seen or nxt in self.known_obstacles:
+                    continue
+                seen.add(nxt)
+                queue.append(nxt)
+        return None
 
     def _threat_escape(self, parsed):
         """LLM 给的威胁矩形：如果本车在里面，就朝最近的矩形外走一步。
