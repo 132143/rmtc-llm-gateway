@@ -231,6 +231,50 @@ class TestAgent(unittest.TestCase):
         self.assertEqual(lines[0]["tick"], 0)
         self.assertIn(lines[0]["action"], ("move", "attack", "defend", "wait"))
 
+    def test_protected_enemy_is_not_attacked(self):
+        """规则 §6.2：最近的敌人处于出生保护时，它挡住后面目标且自身伤害为 0 —— 打了纯浪费。"""
+        agent = self.make_agent(stage=2)
+        frame = perception(tick=3, robots=((1, 0),))
+        frame["visible_entities"][0]["protected"] = True
+        action = agent.on_perception(frame)
+        self.assertNotEqual(action["action"], "attack")
+
+    def test_ai_heartbeat_fires_without_events(self):
+        """规则 §10.2：本场没有一次真实 AI 成功调用 → 任务分 M=0，所以必须主动发一次心跳。"""
+        agent = self.make_agent(stage=2)
+        offers = []
+
+        class FakeUnderstanding:
+            def offer(self, *args, **kwargs):
+                offers.append(kwargs.get("event_key"))
+                return True
+
+            def hint(self, *args, **kwargs):
+                return None
+
+        agent.on_perception(perception(tick=0))          # 先用真实流程建立场次
+        agent.understanding = FakeUnderstanding()        # 再换成假的理解器，避免被 _start_session 覆盖
+        agent.client = type("C", (), {"ok_calls": 0})()
+        agent.on_perception(perception(tick=1))          # 还没到心跳 Tick
+        self.assertEqual(offers, [])
+        agent.on_perception(perception(tick=3))          # 到点亮心跳
+        self.assertEqual(offers, ["__heartbeat__"])
+
+    def test_threat_zone_triggers_escape(self):
+        agent = self.make_agent(stage=2)
+
+        class FakeUnderstanding:
+            def offer(self, *args, **kwargs):
+                return True
+
+            def hint(self, *args, **kwargs):
+                return {"parsed": {"threat_zone": [[6, 6], [10, 10]], "affects_me": True},
+                        "advice": "撤离", "tick": 1, "session_id": "m1"}
+
+        agent.understanding = FakeUnderstanding()
+        action = agent.on_perception(perception(tick=1, pos=(8, 8)))
+        self.assertEqual(action["action"], "move")
+
     def test_hybrid_hunts_instead_of_waiting(self):
         """真机实测：资源被对手抢完后，程序原地 wait 了 415 Tick。hybrid 应该改为去压制对手。"""
         agent = Agent(AgentConfig(seat="A", stage=2, combat_mode="hybrid"))

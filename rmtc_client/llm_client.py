@@ -28,7 +28,9 @@ class ClientConfig:
     token: str = "practice-A"
     timeout_s: float = 1.5
     min_interval_s: float = 2.0   # 两次调用之间的最小间隔
-    max_calls: int = 0            # 本地预算；0 表示不限，只靠服务端 429
+    # 本地预算：规则 §11.3「暂定每席位令牌成功调用上限 100」。
+    # 留出余量（心跳+事件都在里面），默认 60，别把额度一次性烧光。
+    max_calls: int = 60
     backoff_s: float = 1.0
     model: str = ""
     max_tokens: int = 200

@@ -24,7 +24,8 @@ PROMPT_TEMPLATE = """你是机器人比赛的决策助手。请只依据下面�
 1. 只输出一个 JSON 对象，不要代码块，不要多余解释；
 2. 字段：threat_zone（受影响的矩形 [[x1,y1],[x2,y2]] 或 null）、
    affects_me（布尔）、advice（一句话中文应对建议）、urgency_ticks（整数或 null）；
-3. 公告没提到的影响，按 null / false 处理，不要编造。
+3. 公告没提到的影响，按 null / false 处理，不要编造；
+4. threat_zone 必须是矩形左上角与右下角两个整数坐标点。
 """
 
 
@@ -44,7 +45,7 @@ class EventUnderstanding:
 
     # ---------- 注入一条公告 ----------
     def offer(self, session_id: str, tick: int, event_text: str, mission_text: str = "",
-              position=None, map_size=None, seat: str = "") -> bool:
+              position=None, map_size=None, seat: str = "", event_key: str | None = None) -> bool:
         event_text = (event_text or "").strip()
         if not event_text:
             return False
@@ -56,7 +57,7 @@ class EventUnderstanding:
             self._hint = None
         if not self.client.healthy:
             return False
-        key = (session_id, hash(event_text))
+        key = (session_id, event_key or hash(event_text))
         now = time.monotonic()
         last = self._asked.get(key)
         if last is not None and now - last < self.min_repeat_s:

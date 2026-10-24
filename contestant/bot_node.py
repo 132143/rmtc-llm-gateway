@@ -37,24 +37,30 @@ from rclpy.qos import (DurabilityPolicy, HistoryPolicy, QoSProfile,
 from std_msgs.msg import String
 
 from contestant.agent import Agent, AgentConfig
+from contestant.decision import DECISION_TYPES, load_decision_config
 from rmtc_client import ClientConfig, LlmGatewayClient
 
 
-def qos_profile():
-    """协议 §2：感知/动作 RELIABLE + VOLATILE + KEEP_LAST(1)。设错会静默收不到。"""
+def qos_profile(durability=DurabilityPolicy.VOLATILE):
+    """协议 §2：感知/动作 RELIABLE + VOLATILE；注册用 RELIABLE + TRANSIENT_LOCAL + 深度 1。"""
     return QoSProfile(
         reliability=ReliabilityPolicy.RELIABLE,
-        durability=DurabilityPolicy.VOLATILE,
+        durability=durability,
         history=HistoryPolicy.KEEP_LAST,
         depth=1,
     )
 
 
+# 规则 §2.3：现场唯一允许切换的是 decision_config.json 里的 decision_type，
+# 取值必须是赛前封存并向裁判登记过的枚举。登记表在 contestant/decision.py。
+
+
 class RmtcBotNode(Node):
-    def __init__(self, seat, stage, dry_run=False, agent_cfg=None):
+    def __init__(self, seat, stage, dry_run=False, agent_cfg=None, team_name=None):
         super().__init__(f"rmtc_bot_{seat}")
         self.seat = seat
         self.dry_run = dry_run
+        self.team_name = team_name or f"队伍{seat}"
         self.log = self.get_logger()
 
         client = LlmGatewayClient(
@@ -73,6 +79,11 @@ class RmtcBotNode(Node):
         self.publisher = self.create_publisher(String, f"/team_{seat}/action", qos)
         self.subscription = self.create_subscription(
             String, f"/team_{seat}/perception", self.on_perception, qos)
+        # 协议 §12.1：队伍注册话题由选手发布（只改显示名称，不影响身份与权限）。
+        self.registration = self.create_publisher(
+            String, f"/team_{seat}/registration", qos_profile(DurabilityPolicy.TRANSIENT_LOCAL))
+        self.create_timer(5.0, self.publish_registration)
+        self.publish_registration()
         # 失联看门狗：现场最常见的坑是"以为连上了"，其实是 QoS/域号/发现没通。
         self.last_perception_at = None
         self.started_at = self.get_clock().now()
@@ -99,6 +110,11 @@ class RmtcBotNode(Node):
         if gap > 3.0:
             self.get_logger().warn(f"已经 {gap:.1f} 秒没有新感知（比赛暂停？网络断了？）")
             self.last_perception_at = now
+
+    def publish_registration(self):
+        message = String()
+        message.data = json.dumps({"team": self.seat, "name": self.team_name}, ensure_ascii=False)
+        self.registration.publish(message)
 
     def on_perception(self, msg):
         self.last_perception_at = self.get_clock().now()
@@ -127,22 +143,33 @@ def main(argv=None):
     parser.add_argument("--seat", default=os.environ.get("RMTC_SEAT", "A"))
     parser.add_argument("--stage", type=int, default=2)
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--strategy", default=os.environ.get("RMTC_STRATEGY", "greedy"),
-                        choices=["greedy", "snake"])
-    parser.add_argument("--combat",
-                        default=os.environ.get("RMTC_COMBAT_MODE", "hybrid"),
+    # 规则 §2.3：现场切换策略只能改 decision_config.json 里的 decision_type。
+    # 下面两个参数是给"赛前练习/对照实验"用的，正式场次建议只用 --decision-config。
+    parser.add_argument("--decision-config", default="decision_config.json")
+    parser.add_argument("--strategy", default=None, choices=["greedy", "snake"])
+    parser.add_argument("--combat", default=None,
                         choices=["never", "opportunistic", "resource_first", "finish",
                                  "hybrid", "aggressive"])
     parser.add_argument("--reach-after-tick", type=int,
                         default=int(os.environ.get("RMTC_REACH_AFTER_TICK", "250")))
+    parser.add_argument("--team-name", default=os.environ.get("RMTC_TEAM_NAME"))
     args = parser.parse_args(argv)
 
     seat = args.seat.strip().upper()[:1] or "A"
-    agent_cfg = AgentConfig(seat=seat, stage=args.stage, strategy=args.strategy,
-                            combat_mode=args.combat,
+    decision_type, note = load_decision_config(args.decision_config)
+    chosen = dict(DECISION_TYPES[decision_type])
+    if args.strategy:
+        chosen["strategy"] = args.strategy
+    if args.combat:
+        chosen["combat_mode"] = args.combat
+    agent_cfg = AgentConfig(seat=seat, stage=args.stage,
+                            strategy=chosen["strategy"], combat_mode=chosen["combat_mode"],
                             reach_after_tick=args.reach_after_tick)
     rclpy.init()
-    node = RmtcBotNode(seat, args.stage, args.dry_run, agent_cfg)
+    node = RmtcBotNode(seat, args.stage, args.dry_run, agent_cfg, team_name=args.team_name)
+    node.get_logger().info(
+        f"决策类型：{decision_type}（{note}）→ strategy={chosen['strategy']}, "
+        f"combat={chosen['combat_mode']}；队伍名 {node.team_name}")
     try:
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):

@@ -52,7 +52,8 @@ class AgentConfig:
     def __init__(self, seat="A", stage=2, max_hp=100, attack_damage=20,
                  defended_damage=10, low_hp=30, reach_after_tick=250,
                  vision_radius=4, strategy="greedy", combat_mode="hybrid",
-                 aggressive_range=4, resource_threshold=120, finish_hp=60):
+                 aggressive_range=4, resource_threshold=120, finish_hp=60,
+                 ai_heartbeat_tick=3):
         self.seat = seat
         self.stage = stage
         self.max_hp = max_hp
@@ -66,6 +67,9 @@ class AgentConfig:
         self.aggressive_range = aggressive_range
         self.resource_threshold = resource_threshold
         self.finish_hp = finish_hp
+        # 规则 §10.2：第二阶段每场必须有本场本席位至少一次"真实统一 AI 成功调用"，否则任务分 M=0。
+        # 所以不能"等有事件再问"——开局就发一次心跳请求，确保本场有成功记录。
+        self.ai_heartbeat_tick = ai_heartbeat_tick
 
 
 class Agent:
@@ -89,6 +93,7 @@ class Agent:
         self.explored = set()          # 已经"看过"的格子（视野窗口覆盖过的）
         self.known_obstacles = set()   # 见过的障碍（静态，可以永久记住）
         self.last_move = None          # (出发点, 方向)：用来解释下一帧的 E_BLOCKED
+        self.ai_confirmed = False      # 本场是否已经有过成功的 AI 调用（规则要求 ≥1）
         self.stats = {"perceptions": 0, "actions": 0, "skipped": 0}
 
     # ---------- 日志 ----------
@@ -191,6 +196,7 @@ class Agent:
         self.explored = set()
         self.known_obstacles = set()
         self.last_move = None
+        self.ai_confirmed = False
         if self.client is not None:
             from rmtc_client import EventUnderstanding
             self.understanding = EventUnderstanding(self.client, logger=self._logger)
@@ -214,11 +220,30 @@ class Agent:
 
         event_text = data.get("event_text")
         mission_text = data.get("mission_text")
-        if self.understanding is not None and isinstance(event_text, str) and event_text.strip():
-            self.understanding.offer(
-                self.session_id, self.last_tick, event_text,
-                mission_text=mission_text if isinstance(mission_text, str) else "",
-                position=self.pos, map_size=(self.width, self.height), seat=self.cfg.seat)
+        if self.understanding is not None:
+            # 本场"AI 资格"：只要客户端有过一次成功调用就算满足（规则 §10.2 / §11.3）。
+            if self.client is not None and getattr(self.client, "ok_calls", 0) > 0:
+                self.ai_confirmed = True
+            if isinstance(event_text, str) and event_text.strip():
+                self.understanding.offer(
+                    self.session_id, self.last_tick, event_text,
+                    mission_text=mission_text if isinstance(mission_text, str) else "",
+                    position=self.pos, map_size=(self.width, self.height), seat=self.cfg.seat)
+            elif (self.cfg.stage >= 2 and not self.ai_confirmed
+                  and self.last_tick >= self.cfg.ai_heartbeat_tick):
+                # 没有事件也要问一次：否则本场可能一次成功调用都没有 → 任务分直接 0。
+                self.understanding.offer(
+                    self.session_id, self.last_tick,
+                    "（本场暂无事件公告）请说明：在资源争夺中，采集与对抗应该如何取舍。",
+                    mission_text=mission_text if isinstance(mission_text, str) else "",
+                    position=self.pos, map_size=(self.width, self.height), seat=self.cfg.seat,
+                    event_key="__heartbeat__")
+
+        hint = self.understanding.hint(self.session_id, self.last_tick) if self.understanding else None
+        if hint is not None:
+            escape = self._threat_escape(hint.get("parsed"))
+            if escape:
+                return self._move(escape)
 
         enemies = self._enemies(data)
         hp = me.get("hp")
@@ -226,7 +251,7 @@ class Agent:
         if self.cfg.combat_mode == "finish":
             combat_allowed = True      # 出手门槛由"敌人血量"控制（见下）
         elif self.cfg.combat_mode == "resource_first":
-            # 资源分（30 分）在 120 价值封顶；对抗分（15 分）要 300 有效伤害。
+            # 资源分（30 分）在 120 价值封顶；对抗分（15 分）要 500 有效伤害（规则 §10.2，v1.1 从 300 改为 500）。
             # 先吃够资源再开打，比一上来对枪划算（官方裁判实测：open 图 35 → 22.5）。
             score = data.get("score") if isinstance(data.get("score"), dict) else {}
             value = score.get("resource_value")
@@ -251,8 +276,10 @@ class Agent:
                 if in_range:
                     target = min(in_range,
                                  key=lambda e: abs(e[1][0] - self.pos[0]) + abs(e[1][1] - self.pos[1]))
+                    # 规则 §6.2：最近目标是出生保护时，它挡住后面的目标且自身伤害为 0 —— 打了纯浪费 Tick。
+                    protected_target = target[0].get("protected") is True
                     direction = self._line_direction(target[1])
-                    if direction and not me.get("protected"):
+                    if direction and not me.get("protected") and not protected_target:
                         return {"action": "attack", "direction": direction}   # 直线 1~2 格才打得到
             if combat_allowed and self.cfg.combat_mode == "aggressive" and enemies:
                 nearest = min(enemies, key=lambda e: abs(e[1][0] - self.pos[0]) + abs(e[1][1] - self.pos[1]))
@@ -300,6 +327,52 @@ class Agent:
                 return {"action": "wait"}
             return self._move(action["direction"])
         return action
+
+    def _threat_escape(self, parsed):
+        """LLM 给的威胁矩形：如果本车在里面，就朝最近的矩形外走一步。
+
+        规则允许"校验模型输出并用于自主规划"；这里只用一个矩形字段，其余字段不信任。
+        """
+        if not isinstance(parsed, dict) or self.pos is None:
+            return None
+        zone = parsed.get("threat_zone")
+        if isinstance(zone, list) and len(zone) == 2:
+            try:
+                first, second = zone
+                x1, y1 = int(first[0]), int(first[1])
+                x2, y2 = int(second[0]), int(second[1])
+            except (TypeError, ValueError, IndexError):
+                return None
+        elif isinstance(zone, list) and len(zone) == 4:
+            try:
+                x1, y1, x2, y2 = (int(v) for v in zone)
+            except (TypeError, ValueError):
+                return None
+        else:
+            return None
+        x1, x2 = min(x1, x2), max(x1, x2)
+        y1, y2 = min(y1, y2), max(y1, y2)
+        x, y = self.pos
+        if not (x1 <= x <= x2 and y1 <= y <= y2):
+            return None
+        dx = min(x - x1, x2 - x) 
+        dy = min(y - y1, y2 - y)
+        candidates = []
+        if dx <= dy:
+            candidates.append((x1 - 1, y) if x - x1 <= x2 - x else (x2 + 1, y))
+            candidates.append((x, y1 - 1) if y - y1 <= y2 - y else (x, y2 + 1))
+        else:
+            candidates.append((x, y1 - 1) if y - y1 <= y2 - y else (x, y2 + 1))
+            candidates.append((x1 - 1, y) if x - x1 <= x2 - x else (x2 + 1, y))
+        for target in candidates:
+            if not (0 <= target[0] < self.width and 0 <= target[1] < self.height):
+                continue
+            direction = step_toward(self.pos, target,
+                                    self.strategy.blocked | self.known_obstacles,
+                                    self.width, self.height)
+            if direction:
+                return direction
+        return None
 
     # ---------- 记忆维护 ----------
     def _move(self, direction):
