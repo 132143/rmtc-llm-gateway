@@ -45,7 +45,7 @@ for REP in $(seq 1 "$REPS"); do
   for MODE in $MODES; do
     start_referee || { echo "裁判起不来"; exit 1; }
     start_bot "$MODE"
-    for CFG in "$CFGDIR"/official.json "$CFGDIR"/open.json; do
+    for CFG in "$CFGDIR"/*.json; do
       NAME=$(basename "$CFG" .json)
       BODY=$(python3 -c "
 import json

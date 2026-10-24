@@ -10,10 +10,10 @@
 |---|---|
 | 仓库 | https://github.com/132143/rmtc-llm-gateway（main，已推到 `4791112`） |
 | 本地路径 | `D:\dsh\workspaces\default-workspace\rmtc-llm-gateway` |
-| 测试 | **63 个全绿**（网关 26 / 客户端 19 / 参赛代码 18） |
-| 第一阶段真机 | **40.0 / 40**（官方练习裁判，资源 200/200，非法动作 0） |
+| 测试 | **71 个全绿**（网关 26 / 客户端 19 / 参赛代码 26） |
+| 第一阶段真机 | **40.0 / 40**，且换成 9 张不同地图依然 40/40（骨架蛇形只有 8/40） |
 | 第二阶段真机 | **60.0 / 60**（4 车，有效伤害 300 满分，任务 3/3，AI mock 55/55） |
-| 虚拟机 | 开着，IP 变成 `10.236.131.61`（旧文档的 192.168.40.128 已失效） |
+| 虚拟机 | 开着；IP 会随网络变（NAT 时 `10.236.131.61`，插网线后 `10.240.130.231`），先查再连 |
 
 一句话：**能跑、能拿满分（练习场），但真实事件理解（真 LLM）和"强对手对抗"一次都没验证过。**
 
@@ -143,3 +143,50 @@ Get-Content "$env:TEMP\match2.txt" -Encoding UTF8
 | `docs/MATCH_LOG.md` | 真机结果、裁判 API、虚拟机坑位 |
 | `docs/STRATEGY_NOTES.md` | 策略实验数据（含"价值/距离"那次失败实验） |
 | `scripts/vm/runmatch2.sh` | 一键跑第二阶段，下次直接改参数复跑 |
+
+
+---
+
+# 2026-10-23 深夜这一轮（续）
+
+## 新增的可测工具
+
+| 文件 | 作用 |
+|---|---|
+| `scripts/gen_maps.py` | 生成 7 张常规测验图 + 2 张硬图（`docs/sweep_maps*`），都是"16 资源 / 总价值 200" |
+| `scripts/gen_stage2.py` | 生成 3 张第二阶段配置（official / open / big24） |
+| `scripts/vm/runsweep.sh` | 在官方裁判上扫一段策略（`--strategy greedy|snake`） |
+| `scripts/vm/stage2_ab.sh` / `stage2_ab2.sh` | 第二阶段 A/B；**ab2 每格重起裁判+选手**（ab 会互相污染，已弃用） |
+| `scripts/analyze_ab.py` | 把 CSV 汇总成"每模式 × 每图"的平均/最低/最高 |
+| `docs/CONTESTANT_MAP.md` | 感知/动作/任务/事件 → 代码 → 测试 的参赛侧对照表（写技术报告可直接用） |
+| `docs/STAGE2_AB.md` | 第二阶段战斗模式的完整实验记录 |
+
+## 本轮实测结论
+
+1. **第一阶段已封顶**：9 张图（含 24×24、40 障碍、迷宫、贴角）greedy 全部 40/40 且非法动作 0；
+   骨架蛇形全部 8.0（101 步里 96 步 `move:right`，撞墙后原地打转）。
+2. **第二阶段"何时开打"没有想象中重要**：200 Tick 快节奏下
+   `never` 31.7 / `opportunistic` 27.5 / `finish` 23.8 / `resource_first` 20.8。
+   但快节奏把"采集"和"对抗"压在同一段时间里，**不能用来推翻 500 Tick 的结论**；
+   正式节奏下我们实测过 60/60（伤害 300 打满、任务 3/3）。
+3. **A/B 方法论**：同一批里先跑的模式会污染后面的模式；重起进程后三次重复逐位相同。
+   以后做对比一律用 `stage2_ab2.sh`（每格重起）。
+4. **实机验证过的功能**：`--dry-run`（50 条动作打印）、失联看门狗（6.0 秒告警）、
+   `RMTC_TRACE`（201 行/局）、`cat 9×9 解析`、`E_BLOCKED` 回灌。
+
+## 新的踩坑
+
+- **Windows `core.autocrlf=true` → `git archive` 出来的 .sh 是 CRLF**，虚拟机 bash 直接
+  `$'\r': command not found`。已加 `.gitattributes`（`*.sh text eol=lf`），部署脚本里也 `sed -i 's/\r$//'`。
+- **`vmrun runProgramInGuest` 不回显 stdout**，脚本必须写 `/tmp/xxx.txt` 再拷回。
+- **虚拟机跑 GitHub 会偶发 TLS 失败**（`GnuTLS recv error`），部署脚本做成"git 失败就用 tar 覆盖"。
+- **在跑批次的 pwsh 超时 ≠ 虚拟机里的脚本停止**：guest 里的进程会继续跑，导致两批并发写乱 CSV。
+  已加 `flock` 锁，并且超时后先 `pkill` 再重跑。
+
+## 下一步（按收益）
+
+1. **接真实 LLM**（唯一还没验证的关键项）：`start_referee.sh --stage 2 --ai-mode real` +
+   `PRACTICE_LLM_URL/KEY/MODEL`；或把 `rmtc_gateway` 起在 8000 端口、`--upstream` 指向真实服务。
+2. **500 Tick 正式节奏下把三种战斗模式各跑 3 局**（每局 4 分钟，约 40 分钟），再决定默认模式。
+3. 用 `/api/config/1` 导入更大/更刁的地图，验证第一阶段在"非 16 资源"配置下的表现。
+4. 语雀技术报告：直接引用 `docs/CONTESTANT_MAP.md` 与 `docs/STAGE2_AB.md` 的表格。
