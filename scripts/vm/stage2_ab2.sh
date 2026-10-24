@@ -10,6 +10,9 @@ REPS="${1:-2}"
 TICKS="${2:-200}"
 TICKMS="${3:-100}"
 REACH=$(( TICKS * 3 / 5 ))
+# 等待上限必须跟着局时长走：200 Tick × 50 ms 约 10 秒，但正式节奏 500 × 500 ms 要 250 秒。
+# 早先写死 60 次轮询，导致正式节奏的两局被截断在 tick≈120（踩过的坑）。
+POLL_MAX=$(( TICKS * TICKMS / 1000 + 90 ))
 CFGDIR="${5:-$HOME/rmtc-llm-gateway/docs/sweep_stage2}"
 CSV=/tmp/stage2_ab2.csv
 MODES="${4:-never opportunistic resource_first}"
@@ -84,11 +87,15 @@ print(json.dumps({'stage': 2, 'tick_ms': $TICKMS, 'max_ticks': $TICKS,
                   'bots': ['B','C','D'], 'config': json.load(open('$CFG'))}))
 ")
       ensure_started "$BODY" > /dev/null || { echo "开局失败，跳过 $MODE/$NAME"; continue; }
-      for i in $(seq 1 60); do
+      for i in $(seq 1 "$POLL_MAX"); do
         sleep 1
         FIN=$(curl -s -m 2 http://127.0.0.1:8080/api/state | python3 -c "import json,sys;print(json.load(sys.stdin)['status']['finished'])" 2>/dev/null)
         [ "$FIN" = "True" ] && break
       done
+      TICK_NOW=$(curl -s http://127.0.0.1:8080/api/state | python3 -c "import json,sys;print(json.load(sys.stdin)['status']['tick'])" 2>/dev/null)
+      if [ "$TICK_NOW" != "$TICKS" ]; then
+        echo "警告：$MODE/$NAME 只跑到 tick $TICK_NOW / $TICKS（被截断，结果不可信）" >&2
+      fi
       curl -s http://127.0.0.1:8080/api/state | python3 -c "
 import json,sys
 s=json.load(sys.stdin)
