@@ -535,15 +535,25 @@ class TestAgent(unittest.TestCase):
         self.assertEqual(action["action"], "move")
 
     def test_no_resources_left_goes_for_reach(self):
+        """见过资源、后来一个都不剩 → 立刻去任务点（而不是继续空搜）。"""
         agent = Agent(AgentConfig(seat="A", stage=2, combat_mode="hybrid", reach_after_tick=250))
-        agent.on_perception(perception(tick=0, pos=(3, 3), hp=100,
-                                      missions=[{"id": "reach_target", "type": "reach",
-                                                 "position": [9, 9]}]))
+        mission = [{"id": "reach_target", "type": "reach", "position": [9, 9]}]
+        agent.on_perception(perception(tick=0, pos=(3, 3), hp=100, resources=(((1, 0), 10),),
+                                      missions=mission))
+        agent.on_perception(perception(tick=1, pos=(4, 3), hp=100, missions=mission))  # 资源已捡走
         agent.explored = {(x, y) for x in range(18) for y in range(18)}
-        action = agent.on_perception(perception(tick=80, pos=(3, 3), hp=100,
-                                                missions=[{"id": "reach_target", "type": "reach",
-                                                           "position": [9, 9]}]))
+        action = agent.on_perception(perception(tick=80, pos=(3, 3), hp=100, missions=mission))
         self.assertEqual(action["action"], "move")
+
+    def test_never_saw_resources_does_not_skip_searching(self):
+        """从没见过资源 ≠ 没资源；这时不能提前放弃搜索去任务点（实测会把分数打到 3 分）。"""
+        agent = Agent(AgentConfig(seat="A", stage=2, combat_mode="hybrid", reach_after_tick=250))
+        agent.on_perception(perception(tick=0, pos=(3, 3), hp=100))
+        agent.explored = {(x, y) for x in range(18) for y in range(18)}
+        frame = perception(tick=80, pos=(3, 3), hp=100,
+                           missions=[{"id": "reach_target", "type": "reach", "position": [9, 9]}])
+        agent.on_perception(frame)
+        self.assertEqual(agent.resources_ever_seen, 0)
 
     def test_high_value_mission_uses_wider_gate_early(self):
         """只有 4 个高价值资源，抢不到就白丢 5 分：前期放宽到 12 格。"""
