@@ -436,6 +436,9 @@ cd ~/rmtc-llm-gateway && python3 run_tests.py
 | [docs/COMPETITION_PLAN.md](docs/COMPETITION_PLAN.md) | 封存参数表：上场到底按什么跑、三种 decision_type 怎么选、预期成绩 |
 | [docs/PORTABILITY.md](docs/PORTABILITY.md) | Windows / Ubuntu 双系统：哪些能跑、编码换行、无绝对路径自查 |
 | [PROJECT_MANIFEST.json](PROJECT_MANIFEST.json) | 机器可读清单：模块、入口、接口、测试、实测结论（给另一个 LLM 读） |
+| [docs/SUBMISSION_CHECKLIST.md](docs/SUBMISSION_CHECKLIST.md) | **提交清单**：交什么/什么形式/多少份、四张前置检录截图、镜像可选做法 |
+| [docs/TECH_REPORT.md](docs/TECH_REPORT.md) | 语雀技术报告模板（含实测数据表，可直接粘贴） |
+| [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md) | 四组实验：事件压测 / 开局博弈 / 最终统计 / 强对手锦标赛（v1.1 口径） |
 
 ## 12. 规则怎么读、现场怎么用
 
