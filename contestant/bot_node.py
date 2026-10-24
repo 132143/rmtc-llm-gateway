@@ -104,8 +104,9 @@ def main(argv=None):
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--strategy", default=os.environ.get("RMTC_STRATEGY", "greedy"),
                         choices=["greedy", "snake"])
-    parser.add_argument("--combat", default=os.environ.get("RMTC_COMBAT_MODE", "opportunistic"),
-                        choices=["never", "opportunistic", "aggressive"])
+    parser.add_argument("--combat",
+                        default=os.environ.get("RMTC_COMBAT_MODE", "resource_first"),
+                        choices=["never", "opportunistic", "resource_first", "aggressive"])
     parser.add_argument("--reach-after-tick", type=int,
                         default=int(os.environ.get("RMTC_REACH_AFTER_TICK", "250")))
     args = parser.parse_args(argv)
