@@ -73,6 +73,8 @@ GROUPS = {
     # 关掉"任务组合约束"= 旧的"第一个未完成资源任务"逻辑（用来度量丢任务概率的变化）
     "guarded_no_portfolio": {"kind": "ablation", "planner": "guarded",
                              "combat_mode": "hybrid", "mission_portfolio": False},
+    # 扫图型机器人本身（作为被测方，用来确认它真的在扫图、也用来当对照）
+    "sweeper_bot": {"kind": "combo", "planner": "sweeper", "combat_mode": "opportunistic"},
     # 资源争抢评估（race guard）：关掉它 = 上一版行为
     "guarded_no_race_guard": {"kind": "ablation", "planner": "guarded",
                               "combat_mode": "hybrid", "race_guard": False},
@@ -159,6 +161,8 @@ OPPONENTS = {
     "probe_mid": {"planner": "legacy", "combat_mode": "hybrid"},
     "probe_farmer": {"planner": "legacy", "combat_mode": "never"},
     "probe_strong": {"planner": "fused", "combat_mode": "hybrid"},
+    # 扫图型假想敌：移动优先 + 扫遍全图 + 拿最近资源 + 打一下就跑（contestant/sweeper.py）
+    "probe_sweep": {"planner": "sweeper", "combat_mode": "opportunistic"},
 }
 
 ENVIRONMENTS = {

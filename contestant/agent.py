@@ -101,6 +101,7 @@ class AgentConfig:
         #   guarded = 原版决策路径不动 + 三项已验证增量：资源记忆证伪、对抗分封顶感知、
         #             战争期不再空等（batchB：36.60 vs 33.69，前二率 0.625 vs 0.531）
         #   fused   = 收益表内核（tactics/planner 全量收益打分；batchB 35.29，未超过 guarded）
+        #   sweeper = 扫图型假想敌（移动优先 + 扫图 + 拿最近资源 + 躲危险 + 打一下就跑）
         # 三者都不动 IO、调度、状态闸门这些已稳定的模块。
         self.planner = planner
         # decision_type 决定参数增量（02 §3），现场只能改这个字符串，不能改数字。
@@ -202,6 +203,7 @@ class Agent:
         self.stats = {"perceptions": 0, "actions": 0, "skipped": 0}
         # ---- fused 内核（收益表决策）的运行状态；planner="legacy" 时全程不参与 ----
         self._planner = None
+        self._sweeper = None            # planner="sweeper" 时使用的扫图内核（假想敌模式）
         self.enemy_memory = []          # [{"pos","tick","dir","entity"}] 视野外敌车用最后已知位置估值
         self.resource_memory = {}       # 资源格 -> 最后确认 tick（记忆衰减 P-R-04）
         self.dry_ticks = 0              # 连续多少 Tick 没有新发现资源（P-T-02）
@@ -346,6 +348,7 @@ class Agent:
         self.last_move = None
         self.ai_confirmed = False
         self._planner = None
+        self._sweeper = None
         self.enemy_memory = []
         self.resource_memory = {}
         self.dry_ticks = 0
@@ -769,6 +772,42 @@ class Agent:
             combat_allowed=combat_allowed, params=params, deaths=self.deaths,
             war_phase=self.war_phase)
 
+    def _sweeper_action(self, data, me, enemies, hp, combat_allowed):
+        """扫图型假想敌内核（见 contestant/sweeper.py）。
+
+        复用同一套 WorldView 与动作出口，所以 tick/session 回填、幻术反转、状态闸门
+        全部与主策略一致——只换"怎么挑目标"。
+        """
+        if self.pos is None:
+            return None
+        if self._sweeper is None:
+            from contestant.sweeper import SweeperBrain
+            self._sweeper = SweeperBrain(self.width or 24, self.height or 24)
+        self._sweeper.width = self.width or 24
+        self._sweeper.height = self.height or 24
+        view = self._build_world(data, me, enemies, hp, combat_allowed)
+        try:
+            intent = self._sweeper.plan(view)
+        except Exception as exc:
+            self._log("error", f"扫图内核异常（本 Tick 交回原路径）：{exc}")
+            return None
+        if not isinstance(intent, dict):
+            return None
+        action = intent.get("action")
+        if action == "attack":
+            direction = intent.get("direction")
+            if direction not in DIRECTIONS or me.get("protected"):
+                return None
+            self.fused_actions += 1
+            return {"action": "attack", "direction": direction}
+        if action == "move":
+            direction = intent.get("direction")
+            if direction not in DIRECTIONS:
+                return None
+            self.fused_actions += 1
+            return self._move(direction)
+        return None
+
     def _fused_action(self, data, me, enemies, hp, combat_allowed):
         """收益表内核。返回动作 dict，或 None（交回原路径，绝不返回非法动作）。"""
         if self._planner is None:
@@ -852,6 +891,16 @@ class Agent:
             escape = self._threat_escape(hint.get("parsed"))
             if escape:
                 return self._move(escape)
+
+        if self.cfg.planner == "sweeper":
+            # 注意：这里排在 enemies/hp 局部变量赋值之前，必须自己取一份，不要复用后面的变量
+            snapped = self._enemies(data)
+            hp_now = me.get("hp")
+            hp_now = hp_now if isinstance(hp_now, (int, float)) else self.cfg.max_hp
+            swept = self._sweeper_action(data, me, snapped, hp_now,
+                                         self.cfg.stage >= 2 and self.cfg.combat_mode != "never")
+            if swept is not None:
+                return swept
 
         reach_target = self._reach_target()
         if reach_target is not None and self.pos is not None and self.pos == reach_target:
