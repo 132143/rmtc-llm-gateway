@@ -33,6 +33,9 @@ from contestant.stage2_sim import Stage2Map, Stage2Simulation
 # 这样 run_one 不必改签名，也能让所有分组跑在"有事件"的环境里。
 EVENTS_ON = False
 HINT_CACHE = None
+# 裁判地图编辑器导出的地图（--map-file）：设置后所有分组都跑同一张真图，seed 只用于重复
+MAP_FILE = None
+_MAP_CACHE = None
 
 # 单策略：每个只打开一个开关，其余全关（= "把一条思路塞进现有框架"）
 SINGLE_BASE = {"use_race": False, "use_decay": False, "use_route": False,
@@ -174,8 +177,20 @@ def make_brain(seat, spec):
     return Agent(cfg, client=client)
 
 
+def load_editor_map():
+    """读一次编辑器地图并缓存；每局 clone 一份（仿真会就地加临时墙）。"""
+    global _MAP_CACHE
+    if _MAP_CACHE is None:
+        from contestant.map_import import load_editor_file
+        _MAP_CACHE = load_editor_file(MAP_FILE)
+        print("使用编辑器地图：{0}×{1}，障碍 {2}，资源 {3}，出生点 {4}，任务点 {5}".format(
+            _MAP_CACHE.width, _MAP_CACHE.height, len(_MAP_CACHE.obstacles),
+            len(_MAP_CACHE.resources), sorted(_MAP_CACHE.spawns), _MAP_CACHE.reach))
+    return _MAP_CACHE.clone()
+
+
 def run_one(group_spec, env_name, opponent, seed, ticks):
-    game_map = ENVIRONMENTS[env_name](seed)
+    game_map = load_editor_map() if MAP_FILE else ENVIRONMENTS[env_name](seed)
     brains = {"A": make_brain("A", group_spec)}
     for offset, seat in enumerate(("B", "C", "D")):
         brains[seat] = make_brain(seat, OPPONENTS[opponent])
@@ -210,10 +225,23 @@ def run_one(group_spec, env_name, opponent, seed, ticks):
         "sim_error": "",
         "elapsed_s": round(elapsed, 2),
         "seat_scores": scores,
+        "hint_hit": _client_stat(brains["A"], "hit"),
+        "hint_miss": _client_stat(brains["A"], "miss"),
         "fused_actions": brains["A"].fused_actions,
         "fused_reasons": dict(brains["A"].fused_reasons),
         "war_phase_ticks": 0,
     }
+
+
+def _client_stat(brain, key):
+    """回放客户端的命中/未命中计数（没有客户端时返回 0）。"""
+    client = getattr(brain, "client", None)
+    if client is None or not hasattr(client, "stats"):
+        return 0
+    try:
+        return int(client.stats().get(key, 0))
+    except Exception:
+        return 0
 
 
 def summarize(rows):
@@ -235,6 +263,8 @@ def summarize(rows):
         "blocked_moves": sum(row["blocked_moves"] for row in rows),
         "errors": sum(row["errors"] for row in rows),
         "sim_errors": sum(1 for row in rows if row.get("sim_error")),
+        "hint_hit": sum(row.get("hint_hit", 0) for row in rows),
+        "hint_miss": sum(row.get("hint_miss", 0) for row in rows),
         "plan_p99_ms": max((row["plan_p99_ms"] for row in rows), default=0.0),
         "mean_elapsed_s": round(statistics.fmean([row["elapsed_s"] for row in rows]), 2) if rows else 0.0,
     }
@@ -254,10 +284,13 @@ def main(argv=None):
                         help="打开事件注入（默认关：无事件环境更接近第一批实验的可比条件）")
     parser.add_argument("--hint-cache", default=None,
                         help="真实模型理解结果的缓存（由 scripts/record_llm_hints.py 生成）")
+    parser.add_argument("--map-file", default=None,
+                        help="裁判地图编辑器导出的 JSON；给了它就跑这张真图（忽略 --envs）")
     args = parser.parse_args(argv)
-    global EVENTS_ON, HINT_CACHE
+    global EVENTS_ON, HINT_CACHE, MAP_FILE
     EVENTS_ON = bool(args.events)
     HINT_CACHE = args.hint_cache
+    MAP_FILE = args.map_file
 
     groups = [name for name in (args.groups.split(",") if args.groups else []) if name] or list(GROUPS)
     envs = [name for name in (args.envs.split(",") if args.envs else []) if name] or list(ENVIRONMENTS)
@@ -296,17 +329,17 @@ def main(argv=None):
         json.dump(results, handle, ensure_ascii=False, indent=1)
 
     header = ("| 分组 | 类别 | 均值 | 中位 | 最低 | 最高 | 标准差 | 均名次 | 前二率 | 资源 | "
-              "伤害 | 任务 | 死亡 | 无效动作 | 撞墙 | 异常 | P99(ms) |")
-    lines = [header, "|" + "---|" * 17]
+              "伤害 | 任务 | 死亡 | 无效动作 | 撞墙 | 异常 | 提示命中/未中 | P99(ms) |")
+    lines = [header, "|" + "---|" * 18]
     for group, stat in sorted(results.items(), key=lambda item: -item[1]["mean"]):
         lines.append("| {0} | {1} | {2} | {3} | {4} | {5} | {6} | {7} | {8} | {9} | {10} | "
-                     "{11} | {12} | {13} | {14} | {15} | {16} |".format(
+                     "{11} | {12} | {13} | {14} | {15} | {16}/{17} | {18} |".format(
                          group, GROUPS[group]["kind"], stat["mean"], stat["median"],
                          stat["min"], stat["max"], stat["stdev"], stat["mean_rank"],
                          stat["top2_rate"], stat["mean_resource"], stat["mean_damage"],
                          stat["mean_missions"], stat["mean_deaths"], stat["invalid_actions"],
                          stat["blocked_moves"], stat["errors"] + stat["sim_errors"],
-                         stat["plan_p99_ms"]))
+                         stat["hint_hit"], stat["hint_miss"], stat["plan_p99_ms"]))
     table = "\n".join(lines)
     with open(os.path.join(args.out, "lab_summary.md"), "w", encoding="utf-8") as handle:
         handle.write("# 对照实验结果（自动生成）\n\n")

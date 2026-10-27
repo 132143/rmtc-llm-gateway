@@ -76,6 +76,8 @@ def missions_for(game_map):
 # ------------------------------------------------------------------ 地图
 class Stage2Map:
     def __init__(self, width, height, obstacles, resources, spawns, reach=(12, 12)):
+        # 规则 v1.2 / 裁判编辑器：第二阶段到达任务固定为 [12,12]（地图需 ≥13×13 且该格无碍）。
+        # 只有测试完整配置里显式写了别的 reach 时才不同——所以这里不再用"地图中心"当默认值。
         self.width = int(width)
         self.height = int(height)
         self.obstacles = {tuple(p) for p in obstacles}
@@ -115,8 +117,27 @@ class Stage2Map:
         chosen = free[:normal + high]
         resources = [{"position": list(p), "value": 10} for p in chosen[:normal]]
         resources += [{"position": list(p), "value": 20} for p in chosen[normal:normal + high]]
-        reach = (width // 2, height // 2)
+        # 官方任务点是 [12,12]（不是地图中心）：小图上"中心"和 [12,12] 不是一个格，
+        # 用中心会让仿真与裁判判定不一致（实测导致 18×18 的 reach 任务假失败）。
+        reach = (12, 12)
+        if not (0 <= reach[0] < width and 0 <= reach[1] < height):
+            reach = (width // 2, height // 2)
+        if reach in obstacle_cells:
+            obstacle_cells.discard(reach)
         return cls(width, height, obstacle_cells, resources, spawns, reach=reach)
+
+    def clone(self):
+        """复制一份（仿真会就地加临时墙，必须每局一份新地图）。"""
+        return Stage2Map(self.width, self.height, set(self.obstacles),
+                         [{"position": list(pos), "value": value}
+                          for pos, value in self.resources.items()],
+                         dict(self.spawns), reach=self.reach)
+
+    @classmethod
+    def from_editor(cls, payload):
+        """用裁判地图编辑器的 JSON 直接构造（正式地图或测试完整配置都行）。"""
+        from contestant.map_import import build_map
+        return build_map(payload)
 
     @classmethod
     def open_field(cls, width=24, height=24, seed=0):

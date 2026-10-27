@@ -1,0 +1,24 @@
+{
+ "guarded_hybrid": {
+  "runs": 16,
+  "mean": 32.5,
+  "median": 32.5,
+  "min": 30.0,
+  "max": 35.0,
+  "stdev": 2.5,
+  "mean_rank": 3.5,
+  "top2_rate": 0.0,
+  "mean_resource": 30.0,
+  "mean_damage": 625.0,
+  "mean_missions": 2.0,
+  "mean_deaths": 6.5,
+  "invalid_actions": 0,
+  "blocked_moves": 88,
+  "errors": 0,
+  "sim_errors": 0,
+  "hint_hit": 112,
+  "hint_miss": 32,
+  "plan_p99_ms": 3.71,
+  "mean_elapsed_s": 1.28
+ }
+}

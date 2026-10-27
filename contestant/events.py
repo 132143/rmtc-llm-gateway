@@ -26,8 +26,12 @@ TEXT = {
     "pepper": "第 {ann} Tick：随机事件预告：{start} Tick 起 [{x},{y}] 出现火爆辣椒点位，存在 30 Tick。"
               "每次成功移动进入点位会在本 Tick 移动后触发整行整列十字火线，线上其他战车受到 50 HP "
               "环境伤害；交点上的战车不受该条火线伤害。",
-    "fort": "第 {ann} Tick：随机事件预告：{start} Tick 起地图中心生成 3×3 堡垒，存在 50 Tick。"
-            "连续驻留 10 Tick 可获得增益：之后主动攻击会命中自身横纵各 2 格内全部敌人。",
+    # v1.2 §8.5：堡垒"多数是 (11,11)-(13,13) 的 3×3，部分地图有特殊变化，以公告为准"。
+    # 所以公告里**必须写明坐标**——否则模型无法给出 buff_zone，程序就永远不会去蹲
+    # （实测旧文案没有坐标时 buff_zone 恒为 null，等于这条机制在场上完全没生效）。
+    "fort": "第 {ann} Tick：随机事件预告：{start} Tick 起，在地图区域 [{x1},{y1}] 至 [{x2},{y2}] "
+            "出现 3×3 的天下无双堡垒，存在 50 Tick。连续驻留 10 Tick 可获得增益："
+            "之后主动攻击会命中自身横纵各 2 格内全部敌人（含斜向）。",
     "vulnerability": "第 {ann} Tick：随机事件预告：{start} Tick 起 30 Tick 内，前 20 Tick 实际成功移动的"
                      "战车获得易伤，受到的普通攻击与无双伤害翻倍。",
     "heal": "第 {ann} Tick：随机事件预告：{start} Tick 起 [{x},{y}] 出现天使恩泽点位，存在 20 Tick；"
@@ -94,9 +98,11 @@ def default_script(game_map, span=500):
               cells=cross_cells(cx, cy - 4, w, h)),
         Event("pepper", 240, 245, 275, anchor=(max(1, cx - 4), max(1, cy - 4)),
               cells={(max(1, cx - 4), max(1, cy - 4))}),
-        Event("fort", 270, 275, 325, anchor=(cx, cy),
-              cells=frozenset((x, y) for x in range(cx - 1, cx + 2)
-                              for y in range(cy - 1, cy + 2))),
+        # 规则 v1.2 §8.5：天下无双"多数为 (11,11)-(13,13) 的 3×3，部分地图存在特殊变化，
+        # 以赛时自然语言公告与话题为准"。所以这里按公告里**写死的坐标**生成，而不是地图中心；
+        # 程序侧也绝不硬编码堡垒位置——只消费模型给出的 buff_zone。
+        Event("fort", 270, 275, 325, anchor=(12, 12),
+              cells=frozenset((x, y) for x in range(11, 14) for y in range(11, 14))),
         Event("vulnerability", 330, 335, 365),
         Event("heal", 380, 385, 405, anchor=(max(1, cx + 3), max(1, cy + 3)),
               cells={(max(1, cx + 3), max(1, cy + 3))}),

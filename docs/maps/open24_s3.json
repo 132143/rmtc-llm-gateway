@@ -1,0 +1,168 @@
+{
+  "stage": 2,
+  "map": {
+    "width": 24,
+    "height": 24,
+    "obstacles": [],
+    "resources": [
+      {
+        "id": "normal_0_12",
+        "position": [
+          0,
+          12
+        ],
+        "value": 10
+      },
+      {
+        "id": "normal_2_20",
+        "position": [
+          2,
+          20
+        ],
+        "value": 10
+      },
+      {
+        "id": "normal_6_18",
+        "position": [
+          6,
+          18
+        ],
+        "value": 10
+      },
+      {
+        "id": "high_10_7",
+        "position": [
+          10,
+          7
+        ],
+        "value": 20
+      },
+      {
+        "id": "normal_11_15",
+        "position": [
+          11,
+          15
+        ],
+        "value": 10
+      },
+      {
+        "id": "normal_11_22",
+        "position": [
+          11,
+          22
+        ],
+        "value": 10
+      },
+      {
+        "id": "normal_12_19",
+        "position": [
+          12,
+          19
+        ],
+        "value": 10
+      },
+      {
+        "id": "high_13_2",
+        "position": [
+          13,
+          2
+        ],
+        "value": 20
+      },
+      {
+        "id": "normal_14_20",
+        "position": [
+          14,
+          20
+        ],
+        "value": 10
+      },
+      {
+        "id": "normal_16_11",
+        "position": [
+          16,
+          11
+        ],
+        "value": 10
+      },
+      {
+        "id": "normal_17_19",
+        "position": [
+          17,
+          19
+        ],
+        "value": 10
+      },
+      {
+        "id": "high_18_21",
+        "position": [
+          18,
+          21
+        ],
+        "value": 20
+      },
+      {
+        "id": "normal_20_23",
+        "position": [
+          20,
+          23
+        ],
+        "value": 10
+      },
+      {
+        "id": "high_21_5",
+        "position": [
+          21,
+          5
+        ],
+        "value": 20
+      },
+      {
+        "id": "normal_21_17",
+        "position": [
+          21,
+          17
+        ],
+        "value": 10
+      },
+      {
+        "id": "normal_22_11",
+        "position": [
+          22,
+          11
+        ],
+        "value": 10
+      }
+    ]
+  },
+  "robots": [
+    {
+      "team": "A",
+      "spawn": [
+        1,
+        1
+      ]
+    },
+    {
+      "team": "B",
+      "spawn": [
+        22,
+        1
+      ]
+    },
+    {
+      "team": "C",
+      "spawn": [
+        1,
+        22
+      ]
+    },
+    {
+      "team": "D",
+      "spawn": [
+        22,
+        22
+      ]
+    }
+  ]
+}
