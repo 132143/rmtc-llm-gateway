@@ -1,4 +1,9 @@
 #!/bin/bash
+# 令牌/网关只从环境变量读：缺了就立刻停下。
+# 以前这里写死了 练习令牌 + 本地地址，正式比赛直接跑会静默 401 → 本场无 AI 资格 → 任务分 0。
+: "${RMTC_TEAM_TOKEN:?必须设置 RMTC_TEAM_TOKEN（练习用裁判打印的令牌）}"
+: "${RMTC_AI_URL:?必须设置 RMTC_AI_URL（练习用本地裁判的 /v1/chat/completions）}"
+
 STAGE="${1:-2}"; BOTS="${2:-B,C,D}"
 OUT=/tmp/match_${STAGE}.txt
 export STATE_FILE=/tmp/state_${STAGE}.json
@@ -17,8 +22,6 @@ export STATE_FILE=/tmp/state_${STAGE}.json
   cd ~/rmtc-llm-gateway
   source /opt/ros/humble/setup.bash
   export ROS_DOMAIN_ID=27 ROS_LOCALHOST_ONLY=0 RMW_IMPLEMENTATION=rmw_fastrtps_cpp
-  export RMTC_SEAT=A RMTC_TEAM_TOKEN=practice-A
-  export RMTC_AI_URL="http://127.0.0.1:8080/v1/chat/completions"
   nohup python3 -m contestant.bot_node --seat A --stage $STAGE > /tmp/bot.log 2>&1 &
   sleep 8
 

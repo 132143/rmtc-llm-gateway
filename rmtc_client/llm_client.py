@@ -25,8 +25,13 @@ _BACKOFF_CODES = {"rate_limit", "concurrency_limit", "audit_unavailable",
 
 @dataclass
 class ClientConfig:
-    url: str = "http://127.0.0.1:8080/v1/chat/completions"
-    token: str = "practice-A"
+    # 网关地址同样不设默认值：正式比赛必须用主办方地址，练习时显式给本地裁判地址。
+    # 留一个"看起来能用"的默认值 = 现场会静默连到练习端口（然后 401/超时）。
+    url: str = ""
+    # 令牌必须来自现场环境变量（RMTC_TEAM_TOKEN）。默认留空并**快速失败**：
+    # 之前默认 practice-A 会导致"忘了设令牌 → 全程 401 → 任务分 0 但程序照跑"，
+    # 这是最危险的静默失败（规则 §10.2：本场没有真实 AI 成功调用则 M=0）。
+    token: str = ""
     # 真实模型实测延迟：中位 1.0~1.3s，最大 2.7s。超时先设 4s：调用是异步的，
     # 不会堵动作窗；而超时会白吃额度（规则 §11.3），所以宁可多等。
     timeout_s: float = 4.0
@@ -85,6 +90,11 @@ class PendingCall:
 class LlmGatewayClient:
     def __init__(self, cfg: ClientConfig | None = None, logger=None):
         self.cfg = cfg or ClientConfig()
+        if not str(getattr(self.cfg, "token", "") or "").strip():
+            raise ValueError("缺少队伍令牌：请设置环境变量 RMTC_TEAM_TOKEN 后再启动"
+                             "（客户端不会用任何默认令牌，避免静默 401 导致 AI 资格丢失）")
+        if not str(getattr(self.cfg, "url", "") or "").strip():
+            raise ValueError("缺少网关地址：请设置环境变量 RMTC_AI_URL 后再启动")
         self._logger = logger
         self._lock = threading.Lock()
         self._degraded: str = ""          # 非空表示已停用

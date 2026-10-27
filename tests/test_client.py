@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 import unittest
@@ -82,6 +83,37 @@ def make_client(url: str, **overrides) -> LlmGatewayClient:
                 min_interval_s=0.0, backoff_s=0.05, max_calls=0, max_tokens=128)
     base.update(overrides)
     return LlmGatewayClient(ClientConfig(**base))
+
+
+class TestTokenHygiene(unittest.TestCase):
+    """令牌卫生：默认值必须为空、缺失必须立刻报错。
+
+    历史事故：客户端默认 token='practice-A'、bot_node 又用 f"practice-{seat}" 兜底，
+    现场忘设令牌时程序照跑，全程 401 → 本场无真实 AI 调用 → 任务分 0（规则 §10.2）。
+    """
+
+    def test_default_config_has_no_token(self):
+        self.assertEqual(ClientConfig().token, "")
+
+    def test_missing_token_raises_with_actionable_message(self):
+        with self.assertRaises(ValueError) as ctx:
+            LlmGatewayClient(ClientConfig(url="http://127.0.0.1:9/v1/chat/completions"))
+        self.assertIn("RMTC_TEAM_TOKEN", str(ctx.exception))
+
+    def test_missing_url_raises(self):
+        with self.assertRaises(ValueError) as ctx:
+            LlmGatewayClient(ClientConfig(token="t"))
+        self.assertIn("RMTC_AI_URL", str(ctx.exception))
+
+    def test_bot_node_has_no_default_token_or_url(self):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(root, "contestant", "bot_node.py"), encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertIn("RMTC_TEAM_TOKEN", source)
+        self.assertIn("RMTC_AI_URL", source)
+        self.assertNotIn('"practice-', source)      # 不许任何默认令牌
+        self.assertNotIn('practice-' + '{seat}', source)
+        self.assertNotIn("127.0.0.1:8080", source)  # 不许把练习网关当默认值
 
 
 class TestClientCalls(unittest.TestCase):

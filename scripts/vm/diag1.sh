@@ -1,4 +1,9 @@
 #!/bin/bash
+# 令牌/网关只从环境变量读：缺了就立刻停下。
+# 以前这里写死了 练习令牌 + 本地地址，正式比赛直接跑会静默 401 → 本场无 AI 资格 → 任务分 0。
+: "${RMTC_TEAM_TOKEN:?必须设置 RMTC_TEAM_TOKEN（练习用裁判打印的令牌）}"
+: "${RMTC_AI_URL:?必须设置 RMTC_AI_URL（练习用本地裁判的 /v1/chat/completions）}"
+
 OUT=/tmp/match1_diag.txt
 {
   echo "== /api/state 全文（截断 3000）=="

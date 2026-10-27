@@ -89,13 +89,22 @@ class RmtcBotNode(Node):
         self.team_name = team_name or f"队伍{seat}"
         self.log = self.get_logger()
 
-        client = LlmGatewayClient(
-            ClientConfig(
-                url=os.environ.get("RMTC_AI_URL",
-                                   "http://127.0.0.1:8080/v1/chat/completions"),
-                token=os.environ.get("RMTC_TEAM_TOKEN", f"practice-{seat}"),
-                timeout_s=4.0, min_interval_s=0.8),
-            logger=lambda level, text: self.get_logger().info(f"[ai:{level}] {text}"))
+        # 令牌与网关地址只从环境变量来，**绝不设默认值**：
+        # 第二阶段没有它们就立刻报错退出（宁可开不了机，也不要全场静默 401 → 任务分 0）。
+        token = os.environ.get("RMTC_TEAM_TOKEN", "").strip()
+        ai_url = os.environ.get("RMTC_AI_URL", "").strip()
+        client = None
+        if stage >= 2:
+            if not token:
+                raise SystemExit("缺少 RMTC_TEAM_TOKEN：第二阶段必须设置本场令牌（练习可用 practice-A）")
+            if not ai_url:
+                raise SystemExit("缺少 RMTC_AI_URL：第二阶段必须设置网关地址")
+        if token and ai_url:
+            client = LlmGatewayClient(
+                ClientConfig(url=ai_url, token=token, timeout_s=4.0, min_interval_s=0.8),
+                logger=lambda level, text: self.get_logger().info(f"[ai:{level}] {text}"))
+        else:
+            self.get_logger().warning("未设置令牌/网关：本场不调用 AI（第一阶段允许；第二阶段会被拒绝启动）")
         cfg = agent_cfg or AgentConfig(seat=seat, stage=stage)
         self.agent = Agent(cfg, client=client,
                            logger=lambda level, text: self.get_logger().info(text),

@@ -1,4 +1,9 @@
 #!/bin/bash
+# 令牌/网关只从环境变量读：缺了就立刻停下。
+# 以前这里写死了 练习令牌 + 本地地址，正式比赛直接跑会静默 401 → 本场无 AI 资格 → 任务分 0。
+: "${RMTC_TEAM_TOKEN:?必须设置 RMTC_TEAM_TOKEN（练习用裁判打印的令牌）}"
+: "${RMTC_AI_URL:?必须设置 RMTC_AI_URL（练习用本地裁判的 /v1/chat/completions）}"
+
 # 更严格的第二阶段 A/B：每一"轮"都重起裁判与选手进程，并把模式交错（消除顺序污染）。
 # 用法: stage2_ab2.sh [reps] [ticks] [tickms] ["模式1 模式2 ..."] [配置目录]
 # 输出 CSV: mode,config,rep,score,resource_value,damage,missions,hp
@@ -68,8 +73,6 @@ start_bot() {
   ( cd ~/rmtc-llm-gateway
     source /opt/ros/humble/setup.bash
     export ROS_DOMAIN_ID=27 ROS_LOCALHOST_ONLY=0 RMW_IMPLEMENTATION=rmw_fastrtps_cpp
-    export RMTC_SEAT=A RMTC_TEAM_TOKEN=practice-A
-    export RMTC_AI_URL="http://127.0.0.1:8080/v1/chat/completions"
     nohup python3 -m contestant.bot_node --seat A --stage 2 --combat "$mode" \
       --reach-after-tick "$REACH" > "/tmp/bot_${mode}.log" 2>&1 & )
   sleep 6

@@ -1,4 +1,9 @@
 #!/bin/bash
+# 令牌/网关只从环境变量读：缺了就立刻停下。
+# 以前这里写死了 练习令牌 + 本地地址，正式比赛直接跑会静默 401 → 本场无 AI 资格 → 任务分 0。
+: "${RMTC_TEAM_TOKEN:?必须设置 RMTC_TEAM_TOKEN（练习用裁判打印的令牌）}"
+: "${RMTC_AI_URL:?必须设置 RMTC_AI_URL（练习用本地裁判的 /v1/chat/completions）}"
+
 # 在官方练习裁判上扫一批第一阶段的图，跑同一个策略。
 # 用法: runsweep.sh <strategy: greedy|snake> [地图目录]
 # 结果追加到 /tmp/sweep_<strategy>.txt，一行一局：名字 得分 资源 非法动作 感知数
@@ -14,7 +19,6 @@ sleep 1
 cd ~/rmtc-llm-gateway || exit 1
 source /opt/ros/humble/setup.bash
 export ROS_DOMAIN_ID=27 ROS_LOCALHOST_ONLY=0 RMW_IMPLEMENTATION=rmw_fastrtps_cpp
-export RMTC_SEAT=A RMTC_TEAM_TOKEN=practice-A
 nohup python3 -m contestant.bot_node --seat A --stage 1 --strategy "$STRATEGY" > /tmp/bot_sweep.log 2>&1 &
 sleep 6
 
