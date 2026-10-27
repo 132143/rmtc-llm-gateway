@@ -110,6 +110,49 @@ def check_dead_functions(paths):
     return dead
 
 
+def check_doc_drift(paths):
+    """文档里的"N 个 .py / N 个用例"是否还等于现实。
+
+    评审反馈过一类问题：文档写 46 个 .py，实际 51 个。改了代码忘了改文档，
+    答辩时老师一数就露馅。所以把这件事变成扫描项，而不是靠人记。
+    """
+    import re
+    import unittest
+
+    actual_py = len(paths)
+    try:
+        suite = unittest.defaultTestLoader.discover(os.path.join(ROOT, "tests"),
+                                                    top_level_dir=ROOT)
+        actual_tests = suite.countTestCases()
+    except Exception:
+        actual_tests = -1
+    problems = []
+    # 只校验规范写法「当前 N 个 .py」「当前 N 个用例」；历史叙述（"早期 119 个用例"）不算漂移。
+    pattern_py = re.compile(r"当前\s*(\d+)\s*个\s*(?:\.py|Python 文件)")
+    pattern_cases = re.compile(r"当前\s*(\d+)\s*个用例")
+    for base, dirs, files in os.walk(ROOT):
+        dirs[:] = [d for d in dirs if d not in ("__pycache__", ".git")]
+        for name in files:
+            if not name.endswith(".md") and not name.endswith(".txt"):
+                continue
+            path = os.path.join(base, name)
+            try:
+                text = open(path, encoding="utf-8").read()
+            except OSError:
+                continue
+            for match in pattern_py.finditer(text):
+                if int(match.group(1)) != actual_py:
+                    problems.append((os.path.relpath(path, ROOT),
+                                     "写着 {0} 个 .py，实际 {1} 个".format(match.group(1), actual_py)))
+            if actual_tests > 0:
+                for match in pattern_cases.finditer(text):
+                    if int(match.group(1)) != actual_tests:
+                        problems.append((os.path.relpath(path, ROOT),
+                                         "写着 {0} 个用例，实际 {1} 个".format(
+                                             match.group(1), actual_tests)))
+    return problems, actual_py, actual_tests
+
+
 def main():
     paths = sorted(py_files())
     print("扫描 {0} 个 .py".format(len(paths)))
@@ -145,6 +188,15 @@ def main():
             print("   {0}: {1}".format(os.path.relpath(path, ROOT), message))
     else:
         print("[OK] 没有未使用导入")
+
+    drift, actual_py, actual_tests = check_doc_drift(paths)
+    if drift:
+        print("[WARN] 文档数字漂移 {0} 处（实际 {1} 个 .py / {2} 个用例）：".format(
+            len(drift), actual_py, actual_tests))
+        for path, message in drift[:12]:
+            print("   {0}: {1}".format(path, message))
+    else:
+        print("[OK] 文档数字与现实一致（{0} 个 .py / {1} 个用例）".format(actual_py, actual_tests))
 
     dead = check_dead_functions(paths)
     if dead:
