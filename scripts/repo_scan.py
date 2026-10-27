@@ -23,7 +23,7 @@ SKIP_DIRS = {"__pycache__", ".git", "docs", "examples"}
 SECRET_PATTERNS = (
     re.compile(r"sk-[A-Za-z0-9]{16,}"),
     re.compile(r"Bearer\s+sk-"),
-    re.compile(r"asdf1234"),
+    # 说明：这里刻意不写任何真实口令字面量——扫描器自己也不许成为泄漏源。
 )
 
 
