@@ -59,6 +59,13 @@ GROUPS = {
     # 融合版（guarded）：原版决策路径 + 记忆证伪 + 封顶感知 + 战争期不再空等
     "guarded_hybrid": {"kind": "combo", "planner": "guarded", "combat_mode": "hybrid",
                        "memory_falsify": True},
+    # A/B（FUSION_REPORT 18.5）：D 封顶后低血不再主动接敌
+    "guarded_cap70": {"kind": "combo", "planner": "guarded", "combat_mode": "hybrid",
+                      "memory_falsify": True, "cap_retreat_hp": 70},
+    "guarded_cap50": {"kind": "combo", "planner": "guarded", "combat_mode": "hybrid",
+                      "memory_falsify": True, "cap_retreat_hp": 50},
+    "guarded_cap100": {"kind": "combo", "planner": "guarded", "combat_mode": "hybrid",
+                       "memory_falsify": True, "cap_retreat_hp": 100},
     "guarded_opportunistic": {"kind": "combo", "planner": "guarded",
                               "combat_mode": "opportunistic", "memory_falsify": True},
     # 只关掉"争格避让"（H2）：用来单独度量这一条改动的贡献

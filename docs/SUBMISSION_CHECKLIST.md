@@ -22,7 +22,7 @@
 ## 2. 代码侧"提交即现场"的一致性
 
 - 封存 commit：`SEALED_VERSION.txt` 里的哈希（`git rev-parse HEAD` 应与之相同）；
-- `python run_tests.py` 必须全绿（当前 **230 个用例** + 当前 51 个 .py 的全量语法检查）；
+- `python run_tests.py` 必须全绿（当前 **234 个用例** + 当前 51 个 .py 的全量语法检查）；
 - `python -m scripts.repo_scan` 四行 `[OK]`（密钥/语法/未导入/死函数）；
 - 现场只允许改：环境变量（席位/令牌/网关地址/域号）+ `decision_config.json` 的 `decision_type` + 裁判批准的切换；**不改源码**。
 - **令牌/网关地址不再有默认值**：没设 `RMTC_TEAM_TOKEN` / `RMTC_AI_URL` 时，第二阶段启动会直接报错退出（而不是静默 401 丢 15 分）。

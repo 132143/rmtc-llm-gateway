@@ -64,7 +64,8 @@ class AgentConfig:
                  memory_falsify=None, mission_portfolio=True, obstacle_ttl=40,
                  high_value_scale=1.0, high_first_ticks=250, race_guard=False,
                  race_history_ticks=12, race_weak_hp=40, race_weak_ratio=0.6,
-                 patrol_skip_reached=False, late_cap_guard=False, early_quiet=0):
+                 patrol_skip_reached=False, late_cap_guard=False, early_quiet=0,
+                 cap_retreat_hp=0):
         self.seat = seat
         self.stage = stage
         self.max_hp = max_hp
@@ -145,6 +146,10 @@ class AgentConfig:
         #   ② late_cap_guard：末期封顶后不巡逻。96 局逐位相同（完全惰性）→ 保留但不启用。
         self.patrol_skip_reached = bool(patrol_skip_reached)
         self.late_cap_guard = bool(late_cap_guard)
+        # cap_retreat_hp：对抗分已封顶（D≥500）且血量低于该阈值时，**不再主动接敌**。
+        # 动机（FUSION_REPORT 18.5）：D 封顶后每次接敌只可能亏（死一次 −60 D，而多打不加分）。
+        # 默认 0 = 关闭；打开后仍保留"贴脸还手"和低血防御。
+        self.cap_retreat_hp = int(cap_retreat_hp or 0)
         # 开局静默：前 N 片不主动开火（只保命、只抢资源）。用于验证"早期接敌是否伤 rv 下限"。
         self.early_quiet = int(early_quiet)
         if overrides:
@@ -386,6 +391,24 @@ class Agent:
         else:
             self.strategy = GreedyBfsStrategy(self.width, self.height,
                                               detour=self.cfg.strategy_detour)
+
+    def _cap_retreat_active(self, data, hp):
+        """D 已封顶且血量偏低 → 本 Tick 不主动接敌（只防守/采集）。
+
+        规则依据：§10.2 对抗分 15×min(D/500,1) 封顶；死亡 −60 D 且不可回收。
+        所以"打满 500 之后继续接敌"的期望收益是负的——这正是 18.5 节量化出的浪费
+        （guarded vs probe_mid：多打 487 点、白死 4.5 次）。
+        """
+        if not self.cfg.cap_retreat_hp:
+            return False
+        if self._llm_intent_active("engage"):
+            return False                     # 模型明确要求拦截时，服从模型
+        score = data.get("score") if isinstance(data.get("score"), dict) else {}
+        damage = score.get("effective_damage")
+        damage = damage if isinstance(damage, (int, float)) else 0
+        if damage < 500:
+            return False                     # 还没封顶：照打（封顶前是纯收益）
+        return isinstance(hp, (int, float)) and hp < self.cfg.cap_retreat_hp
 
     def _damage_worth_attacking(self, data):
         """这一 Tick 要不要为攻击放弃采集。
@@ -987,8 +1010,10 @@ class Agent:
                     protected_target = target[0].get("protected") is True
                     direction = self._line_direction(target[1])
                     quiet = (self.cfg.early_quiet and self.last_tick < self.cfg.early_quiet)
+                    retreat = self._cap_retreat_active(data, hp)
                     if (direction and not me.get("protected") and not protected_target
-                            and not quiet and self._damage_worth_attacking(data)):
+                            and not quiet and not retreat
+                            and self._damage_worth_attacking(data)):
                         return {"action": "attack", "direction": direction}   # 直线 1~2 格才打得到
             # 任务组合约束（只在"后半程还没补齐"时抢优先级）：
             # 战争期找人会连续吃掉几十个 Tick，而资源类任务一旦错过就再也补不回来（−5 分）。
@@ -1091,8 +1116,10 @@ class Agent:
                         self.patrol_before_cap += 1
                     return self._move(direction)
         if (action.get("action") == "wait" and self.cfg.stage >= 2
-                and self.cfg.combat_mode == "hybrid" and enemies):
+                and self.cfg.combat_mode == "hybrid" and enemies
+                and not self._cap_retreat_active(data, hp)):
             # 资源已经抢完/看不见了：与其原地等到结束，不如去压制对手（可能抢到资源、也有伤害分）
+            # 例外（cap_retreat_hp）：D 已封顶且血薄 → 去压制只可能把命送掉（每死一次 −60 D），所以不去。
             nearest = min(enemies, key=lambda e: abs(e[1][0] - self.pos[0]) + abs(e[1][1] - self.pos[1]))
             direction = self._line_direction(nearest[1])
             if direction and not me.get("protected"):

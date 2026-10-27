@@ -79,6 +79,43 @@ class TestSimulatorAndStrategy(unittest.TestCase):
         self.assertIsNone(decode_relative("坏了"))
 
 
+class TestCapRetreat(unittest.TestCase):
+    """A/B 开关：D 已封顶 + 血薄 → 不主动接敌（FUSION_REPORT 18.5 的量化结论）。
+
+    规则依据：§10.2 对抗分 15×min(D/500,1) 封顶，死亡 −60 D 不可回收。
+    """
+
+    def build(self, cap, hp=50, damage=520):
+        cfg = AgentConfig(seat="A", stage=2, planner="guarded", combat_mode="hybrid",
+                          memory_falsify=True, cap_retreat_hp=cap)
+        agent = Agent(cfg)
+        agent.width, agent.height = 24, 24
+        data = perception(tick=300, pos=(10, 10), hp=hp, robots=[(2, 0)],
+                          width=24, height=24)
+        data["score"] = {"effective_damage": damage}
+        return agent, data
+
+    def test_off_by_default_keeps_attacking(self):
+        agent, data = self.build(cap=0)
+        action = agent.on_perception(data)
+        self.assertEqual(action["action"], "attack")
+
+    def test_retreat_suppresses_attack_when_capped_and_low(self):
+        agent, data = self.build(cap=70, hp=50, damage=520)
+        action = agent.on_perception(data)
+        self.assertNotEqual(action["action"], "attack")
+
+    def test_retreat_does_not_suppress_below_cap(self):
+        agent, data = self.build(cap=70, hp=50, damage=300)
+        action = agent.on_perception(data)
+        self.assertEqual(action["action"], "attack")
+
+    def test_retreat_does_not_suppress_when_hp_high(self):
+        agent, data = self.build(cap=70, hp=95, damage=520)
+        action = agent.on_perception(data)
+        self.assertEqual(action["action"], "attack")
+
+
 class TestAgent(unittest.TestCase):
     def make_agent(self, stage=1, **cfg):
         # 这些用例专门验证"进入射程就打"的动作格式，所以固定用 opportunistic；
