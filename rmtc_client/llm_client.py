@@ -43,7 +43,13 @@ class ClientConfig:
     max_calls: int = 90
     backoff_s: float = 1.0
     model: str = ""
-    max_tokens: int = 200
+    # 官方口径（2026-10-28 主办方答疑）：建议 512–1024 tokens。原来 200 太紧——
+    # 模型输出 JSON + avoid_cells 列表实测接近 300 tokens，200 会把列表截断成坏 JSON。
+    max_tokens: int = 512
+    # 官方网关除 model 外全部字段直接转发；DeepSeek 思考模式**默认开启**，
+    # 关闭方式为请求 JSON 顶层 thinking={"type":"disabled"}。关思考后官方实测 0.78–0.99 s。
+    # 不关的话思考 token 与回答共占 max_tokens，小预算很容易只返回空 content，且延迟顶到 4 s 超时。
+    disable_thinking: bool = True
     json_mode: bool = True        # 让模型只输出 JSON（减少解析失败）
 
 
@@ -105,6 +111,8 @@ class LlmGatewayClient:
         self._spent = 0                 # 已占用的额度（按发出的请求计，超时也算）
         self._last_code = ""
         self._json_mode_off = False     # 网关不接受 response_format 时置位（见 _on_http_error）
+        self._thinking_off = False      # 上游拒绝 thinking 字段时置位（本场改发默认思考模式）
+        self._logged_shape = False      # 只打印一次请求参数（检录时用来证明 thinking=disabled）
 
     # ---------- 对外状态 ----------
     @property
@@ -127,11 +135,19 @@ class LlmGatewayClient:
         with self._lock:
             return self._attempts
 
+    @property
+    def thinking_mode(self) -> str:
+        """当前实际发送的思考模式：disabled（官方关闭写法）/ default（上游默认，开思考）。"""
+        if self.cfg.disable_thinking and not self._thinking_off:
+            return "disabled"
+        return "default"
+
     def stats(self) -> dict:
         with self._lock:
             return {"attempts": self._attempts, "ok_calls": self._ok_calls,
                     "in_flight": self._in_flight, "spent": self._spent,
-                    "degraded": self._degraded, "last_code": self._last_code}
+                    "degraded": self._degraded, "last_code": self._last_code,
+                    "thinking": self.thinking_mode, "max_tokens": self.cfg.max_tokens}
 
     def _log(self, level: str, text: str) -> None:
         if self._logger is not None:
@@ -174,10 +190,14 @@ class LlmGatewayClient:
             return LlmResult(ok=False, code="local_skipped", message=f"skip: {reason}")
 
         try:
-            result = self._ask_once(prompt, messages, timeout_s, max_tokens)
-            if result.code == "json_mode_rejected":
-                # 已经关掉 response_format，立刻重试一次（不再占预算名额之外的名额）
+            # 最多额外重试 2 次：response_format 与 thinking 两个"可选字段被上游拒绝"各允许回退一次。
+            # 400 不产生 2xx、不消耗网关成功配额（规则 §11.3 只按成功调用记账），所以回退重试不白烧额度；
+            # 反过来，如果因为一个可选字段就让整场放弃 AI，等于直接丢掉任务分 15 分（规则 §10.2）。
+            result = None
+            for _ in range(3):
                 result = self._ask_once(prompt, messages, timeout_s, max_tokens)
+                if result.code not in ("json_mode_rejected", "thinking_rejected"):
+                    return result
             return result
         finally:
             self._release()
@@ -193,8 +213,22 @@ class LlmGatewayClient:
             # 真机踩坑：DeepSeek 对 json_object 要求 prompt 里出现 "json"，否则 400；
             # 网关/模型换代也可能直接不支持这个字段 —— 一旦被拒就本场关掉它（见 _on_http_error）。
             payload["response_format"] = {"type": "json_object"}
+        if self.cfg.disable_thinking and not self._thinking_off:
+            # 官方口径：顶层 thinking={"type":"disabled"} 关闭思考模式（关闭后实测 0.78–0.99 s）。
+            # 不关的话思考 token 与回答共占 max_tokens，小预算容易只返回空 content，延迟也会顶到超时。
+            payload["thinking"] = {"type": "disabled"}
         if self.cfg.model:
+            # 官方要求：必须使用统一默认模型，选手**不要**填写 model（严禁私自调用其他模型）。
+            # 这里保留字段只为离线直连 api.deepseek.com 录制用；正式比赛 RMTC_MODEL 不设即可。
             payload["model"] = self.cfg.model
+        if not self._logged_shape:
+            # 只打一次、且不含令牌与提示词：检录时用这一行证明"思考已关、预算是多少"。
+            self._logged_shape = True
+            self._log("info", "AI 请求参数：thinking={0}，json_mode={1}，max_tokens={2}，timeout={3}s".format(
+                self.thinking_mode,
+                "on" if (self.cfg.json_mode and not self._json_mode_off) else "off",
+                max_tokens if max_tokens is not None else self.cfg.max_tokens,
+                timeout_s or self.cfg.timeout_s))
 
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         request = urllib.request.Request(
@@ -258,6 +292,14 @@ class LlmGatewayClient:
         # 只针对"这个网关不接受 response_format=json_object"的一种 400：关掉该字段后重试一次。
         # 为什么值得为此多花 1 次配额：AI 资格=任务分 15 分，一次格式被拒不能连带整场归零。
         lowered = message.lower()
+        if (not self._thinking_off and self.cfg.disable_thinking and exc.code == 400
+                and "thinking" in lowered):
+            # 上游不认识 thinking 字段（换了实现/旧网关）：本场改发默认思考模式，立刻重试一次。
+            with self._lock:
+                self._thinking_off = True
+                self._last_code = "thinking_rejected"
+            self._log("warn", "上游拒绝 thinking 字段（{0}），本场改为默认思考模式".format(message[:80]))
+            return self._fail("thinking_rejected", exc.code, message, started)
         if (not self._json_mode_off and exc.code == 400
                 and "json_object" in lowered + str(code) and "response_format" in lowered):
             with self._lock:

@@ -116,6 +116,49 @@ class TestTokenHygiene(unittest.TestCase):
         self.assertNotIn("127.0.0.1:8080", source)  # 不许把练习网关当默认值
 
 
+class TestGatewayPayload(unittest.TestCase):
+    """请求体必须与官方口径一致（2026-10-28 答疑）。
+
+    官方三条硬约束：
+      1. 必须用统一默认模型 → 选手**不要**填 model（严禁私自调用别的模型）；
+      2. 思考模式默认开启 → 要关必须在顶层发 thinking={"type":"disabled"}（关闭后实测 0.78–0.99 s）；
+      3. max_tokens 建议 512–1024（我们原来 200，会把 avoid_cells 列表截断）。
+    """
+
+    def test_payload_shape(self):
+        with FakeGateway() as gateway:
+            # 用**默认配置**（不覆盖 max_tokens），验证出厂口径就是 512
+            client = LlmGatewayClient(ClientConfig(url=gateway.url, token="practice-A",
+                                                   timeout_s=2.0, min_interval_s=0.0))
+            result = client.ask("请只输出 JSON：{\"ok\":true}")
+            self.assertTrue(result.ok, result)
+            body = gateway.requests[0]["body"]
+            self.assertEqual(body["thinking"], {"type": "disabled"})
+            self.assertEqual(body["max_tokens"], 512)
+            self.assertNotIn("model", body)          # 不填 model：用官方默认
+            self.assertEqual(body["response_format"], {"type": "json_object"})
+
+    def test_thinking_rejected_falls_back_once(self):
+        with FakeGateway(script=[{"status": 400, "payload": error_payload(
+                "unknown field: thinking", 400)}]) as gateway:
+            client = make_client(gateway.url)
+            result = client.ask("请只输出 JSON：{\"ok\":true}")
+            self.assertTrue(result.ok, result)
+            self.assertEqual(len(gateway.requests), 2)
+            self.assertIn("thinking", gateway.requests[0]["body"])
+            self.assertNotIn("thinking", gateway.requests[1]["body"])   # 回退后不再发
+            self.assertEqual(client.thinking_mode, "default")
+
+    def test_env_can_keep_thinking_on(self):
+        with FakeGateway() as gateway:
+            client = make_client(gateway.url, disable_thinking=False,
+                                 model="deepseek-flash")
+            self.assertTrue(client.ask("json").ok)
+            body = gateway.requests[0]["body"]
+            self.assertNotIn("thinking", body)
+            self.assertEqual(body["model"], "deepseek-flash")           # 只在显式配置时才发
+
+
 class TestClientCalls(unittest.TestCase):
     def test_success(self):
         with FakeGateway() as gateway:

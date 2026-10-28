@@ -65,7 +65,7 @@ class AgentConfig:
                  high_value_scale=1.0, high_first_ticks=250, race_guard=False,
                  race_history_ticks=12, race_weak_hp=40, race_weak_ratio=0.6,
                  patrol_skip_reached=False, late_cap_guard=False, early_quiet=0,
-                 cap_retreat_hp=0):
+                 cap_retreat_hp=0, center_pull=0.8, center_pull_ticks=60, econ_guard=60):
         self.seat = seat
         self.stage = stage
         self.max_hp = max_hp
@@ -150,6 +150,17 @@ class AgentConfig:
         # 动机（FUSION_REPORT 18.5）：D 封顶后每次接敌只可能亏（死一次 −60 D，而多打不加分）。
         # 默认 0 = 关闭；打开后仍保留"贴脸还手"和低血防御。
         self.cap_retreat_hp = int(cap_retreat_hp or 0)
+        # === 2026-10-28 方案A（队长拍板，n=600 配对 Δ+3.48）===
+        # center_pull / center_pull_ticks：前 N 片里"没有资源目标"时，探索目标按
+        #   score = 曼哈顿距离 + center_pull × 到地图中心的切比雪夫距离
+        # 选，从角上开局不再沿边界扫成一条直线带（见 docs/EXPLORATION_ISSUE.md）。
+        self.center_pull = float(center_pull or 0.0)
+        self.center_pull_ticks = int(center_pull_ticks or 0)
+        # econ_guard：前 N 片内"还有资源可采"时不为换血攻击（只让路给采集，不是一律不开火）。
+        self.econ_guard = int(econ_guard or 0)
+        # 门控：只在封存默认档（guarded + hybrid）生效；economy/turtle/center_grab 保持旧行为，
+        # 现场切换 decision_type 就等于一键回滚。
+        self._adopted_default = (planner == "guarded" and combat_mode == "hybrid")
         # 开局静默：前 N 片不主动开火（只保命、只抢资源）。用于验证"早期接敌是否伤 rv 下限"。
         self.early_quiet = int(early_quiet)
         if overrides:
@@ -209,6 +220,8 @@ class Agent:
         # ---- fused 内核（收益表决策）的运行状态；planner="legacy" 时全程不参与 ----
         self._planner = None
         self._sweeper = None            # planner="sweeper" 时使用的扫图内核（假想敌模式）
+        self.center_pull_used = 0       # 中心偏置真正生效的 Tick 数（只统计，用于自检）
+        self.econ_guard_ticks = 0       # "有资源可采 → 不为换血攻击"被触发的 Tick 数
         self.enemy_memory = []          # [{"pos","tick","dir","entity"}] 视野外敌车用最后已知位置估值
         self.resource_memory = {}       # 资源格 -> 最后确认 tick（记忆衰减 P-R-04）
         self.dry_ticks = 0              # 连续多少 Tick 没有新发现资源（P-T-02）
@@ -280,6 +293,7 @@ class Agent:
             if isinstance(value, int) and value > 0:
                 setattr(self, attr, value)
         self._ensure_strategy()
+        self._sync_center_pull()      # 方案A：按 Tick 窗口设置探索中心偏置
 
         missions = data.get("missions")
         if isinstance(missions, list):
@@ -391,6 +405,44 @@ class Agent:
         else:
             self.strategy = GreedyBfsStrategy(self.width, self.height,
                                               detour=self.cfg.strategy_detour)
+            self._sync_center_pull()
+
+    def _sync_center_pull(self):
+        """按 Tick 窗口 + 决策类型门控设置探索的中心偏置（方案A）。
+
+        窗口外一律回到 0.0，等价于旧版"最近未探明格"行为——现场切 economy 档就是回滚。
+        """
+        if self.strategy is None or not hasattr(self.strategy, "center_pull"):
+            return
+        window = int(self.cfg.center_pull_ticks or 0)
+        active = (bool(self.cfg._adopted_default)
+                  and float(self.cfg.center_pull or 0.0) > 0.0
+                  and 0 <= self.last_tick < window)
+        self.strategy.center_pull = float(self.cfg.center_pull) if active else 0.0
+        if active:
+            self.center_pull_used += 1
+
+    def _econ_guard_active(self, data):
+        """2026-10-28 方案A：前 econ_guard 片内，若"还有资源可采"就不为换血攻击。
+
+        依据：全图 16 块资源通常在 50 片内被四队抢完，资源分/任务分只取决于开局窗口；
+        而攻击分支排在采集之前，狭窄图上会变成"换血 → 阵亡 → 复活走回"的循环。
+        与 early_quiet 的区别：early_quiet 前 N 片一律不开火；本开关只在"有资源可采"时让路，
+        被打还手、低血防御、无资源压制、模型要求接敌都不受影响。
+        """
+        if not self.cfg._adopted_default:
+            return False
+        if not self.cfg.econ_guard or self.last_tick >= self.cfg.econ_guard:
+            return False
+        if self._llm_intent_active("engage"):
+            return False                      # 模型明确要求拦截：服从模型
+        if self._resources(data):
+            self.econ_guard_ticks += 1
+            return True                       # 视野里还有资源：先采集，不换血
+        if self._reachable_resource_distance(data, radius=8) is not None:
+            self.econ_guard_ticks += 1
+            return True
+        return False
 
     def _cap_retreat_active(self, data, hp):
         """D 已封顶且血量偏低 → 本 Tick 不主动接敌（只防守/采集）。
@@ -1011,8 +1063,10 @@ class Agent:
                     direction = self._line_direction(target[1])
                     quiet = (self.cfg.early_quiet and self.last_tick < self.cfg.early_quiet)
                     retreat = self._cap_retreat_active(data, hp)
+                    # 2026-10-28 方案A：开局经济窗口内"有资源可采"时不为换血攻击
+                    econ = self._econ_guard_active(data)
                     if (direction and not me.get("protected") and not protected_target
-                            and not quiet and not retreat
+                            and not quiet and not retreat and not econ
                             and self._damage_worth_attacking(data)):
                         return {"action": "attack", "direction": direction}   # 直线 1~2 格才打得到
             # 任务组合约束（只在"后半程还没补齐"时抢优先级）：

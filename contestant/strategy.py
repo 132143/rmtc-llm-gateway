@@ -120,6 +120,9 @@ class GreedyBfsStrategy(BaseStrategy):
         # 探索偏置：near = 最近的未探明格（原版）；far = 最远的未探明格。
         # 用途只在"任务缺稀缺资源、需要更快铺开视野"时临时切到 far。
         self.explore_bias = explore_bias
+        # 开局探索"朝地图中心拉"的强度（2026-10-28 方案A，默认由 Agent 按 Tick 窗口设置）。
+        # explore() 里目标评分 = 曼哈顿距离 + center_pull × 到中心的切比雪夫距离；0 = 原版行为。
+        self.center_pull = 0.0
 
     def decide(self, view):
         targets = dict(self.seen_resources)
@@ -153,7 +156,15 @@ class GreedyBfsStrategy(BaseStrategy):
 
         默认去最近的（原版）；explore_bias="far" 时去最远的——用于"缺稀缺资源"时
         更快铺开视野（最近优先容易在出生点附近反复打转，实测会把整块区域留到很晚才看）。
+
+        center_pull > 0 时（2026-10-28 方案A，封存默认 0.8 / 仅前 60 Tick）：
+          score = 到自身曼哈顿距离 + center_pull × 到地图中心的切比雪夫距离，
+        仍然是"就近探索"，但同样近时优先朝中间（资源密集区）推进——从角上开局不再
+        沿角区边界一路扫（docs/EXPLORATION_ISSUE.md：那条直线带让 17.7% 的局只拿到 1~2 个资源）。
         """
+        pull = float(getattr(self, "center_pull", 0.0) or 0.0)
+        cx = (self.width - 1) / 2.0
+        cy = (self.height - 1) / 2.0
         best = None
         far = str(getattr(self, "explore_bias", "near")) == "far"
         for y in range(self.height):
@@ -161,8 +172,15 @@ class GreedyBfsStrategy(BaseStrategy):
                 if (x, y) in view.explored or (x, y) in (self.blocked | view.obstacles):
                     continue
                 dist = abs(x - view.pos[0]) + abs(y - view.pos[1])
-                if best is None or (dist > best[0] if far else dist < best[0]):
-                    best = (dist, (x, y))
+                if pull > 0.0:
+                    score = dist + pull * max(abs(x - cx), abs(y - cy))
+                    key = (score, dist, y, x)      # 同分按扫描顺序，保持确定性
+                elif far:
+                    key = (-dist, y, x)
+                else:
+                    key = (dist, y, x)
+                if best is None or key < best[0]:
+                    best = (key, (x, y))
         if best is None:
             return self.wait()
         direction = step_toward(view.pos, best[1], self.blocked | view.obstacles, self.width, self.height)

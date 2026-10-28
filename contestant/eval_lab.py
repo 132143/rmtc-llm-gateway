@@ -59,6 +59,15 @@ GROUPS = {
     # 融合版（guarded）：原版决策路径 + 记忆证伪 + 封顶感知 + 战争期不再空等
     "guarded_hybrid": {"kind": "combo", "planner": "guarded", "combat_mode": "hybrid",
                        "memory_falsify": True},
+    # 对照：方案A 之前的封存行为（center_pull/econ_guard 都关）
+    "guarded_prev": {"kind": "combo", "planner": "guarded", "combat_mode": "hybrid",
+                     "memory_falsify": True, "center_pull": 0.0, "econ_guard": 0},
+    # 方案A 单开（分别度量两条机制的贡献）
+    "guarded_center_only": {"kind": "combo", "planner": "guarded", "combat_mode": "hybrid",
+                            "memory_falsify": True, "center_pull": 0.8,
+                            "center_pull_ticks": 60, "econ_guard": 0},
+    "guarded_econ_only": {"kind": "combo", "planner": "guarded", "combat_mode": "hybrid",
+                          "memory_falsify": True, "center_pull": 0.0, "econ_guard": 60},
     # A/B（FUSION_REPORT 18.5）：D 封顶后低血不再主动接敌
     "guarded_cap70": {"kind": "combo", "planner": "guarded", "combat_mode": "hybrid",
                       "memory_falsify": True, "cap_retreat_hp": 70},

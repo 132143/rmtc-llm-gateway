@@ -282,6 +282,19 @@ export RMTC_TEAM_NAME='<队名>'
 - `threat_zone` → 本车在矩形内时先撤到矩形外；
 - 其余字段只记日志，不直接指挥动作。
 
+### 7.4 官方网关口径（2026-10-28 答疑，已进代码）
+
+| # | 官方口径 | 我们的实现 |
+|---|---|---|
+| 1 | 网关**除 model 外**字段直接转发，无白名单 | 只发 messages / max_tokens / response_format / thinking，**不填 model** |
+| 2 | 思考模式**默认开启**；关闭用顶层 `thinking={"type":"disabled"}`，关闭后延迟 0.78–0.99 s | `ClientConfig.disable_thinking=True` 默认带该字段 |
+| 3 | `max_tokens` 建议 **512–1024** | 默认 **512**（原 200 会截断 avoid_cells 列表） |
+| 4 | **必须用统一默认模型**，不得填写 model | `bot_node` 不读 `RMTC_MODEL` |
+| 5 | response_format / temperature 等由选手填，上游判断 | 用 json_object；被拒自动回退（thinking 与 response_format 各一次） |
+
+> 检录自证：首次调用会打印 `[ai:info] AI 请求参数：thinking=disabled，json_mode=on，max_tokens=512，timeout=4.0s`。
+> 详见 `docs/GATEWAY_THINKING_20261028.md`。
+
 ### 7.5 ⚠️ 一个必须记住的差异：练习包是 v1.0 的 300 封顶
 
 - 练习包 `rules.txt`：`对抗得分 = 15 × min(D / 300, 1)`
