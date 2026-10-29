@@ -142,7 +142,7 @@ cd ~/rmtc_practice && ./start_referee.sh --stage 2 --ai-mode real
 # 2) 三个陪练（新终端）
 for s in B C D; do RMTC_TEAM_TOKEN=practice-$s ./start_bot.sh $s "陪练$s" & sleep 2; done
 # 3) 自检 + 起程序（新终端）
-cd ~/run/rmtc-competition-2026-10-29
+cd ~/run/rmtc-competition-2026-10-31
 python3 -m scripts.preflight
 export RMTC_TRACE=/tmp/trace_A.jsonl && python3 -m contestant.bot_node --seat A --stage 2
 # 4) 开赛

@@ -25,8 +25,8 @@
 生成方式（**必须用脚本**，不要用 Windows 的"压缩"）：
 
 ```bash
-python3 -m scripts.package --runtime --out ../dist --name rmtc-runtime-2026-10-30   # 现场集
-python3 -m scripts.package --out ../dist --name rmtc-competition-2026-10-29          # 完整仓库
+python3 -m scripts.package --runtime --out ../dist --name rmtc-runtime-2026-10-31   # 现场集
+python3 -m scripts.package --out ../dist --name rmtc-competition-2026-10-31          # 完整仓库
 ```
 
 现场集的白名单由 `tests/test_runtime_bundle.py` 守住（漏一个文件就会在测试里报错），**不要手动增删**。
