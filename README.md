@@ -13,6 +13,27 @@
 客户端这一半必须自己写对（不然动作窗被等模型堵死、或者额度一用完就崩），
 服务端这一半写出来是为了能在本机把整条链路 + 所有错误分支都验证一遍。
 
+## -1. 交付分两份（现场用 / 练习用）
+
+同一个仓库，两种用法，**不要混**：
+
+| 包 | 内容 | 文件数 | 给谁 |
+|---|---|---|---|
+| `rmtc-runtime-<日期>.zip` | **只有上场要用的**：`contestant/`（8 个运行期模块）+ `rmtc_client/`（4）+ `scripts/preflight.py`、`scripts/trace_view.py` + `decision_config.json` + `SEALED_VERSION.txt` + `RUN_ON_SITE.md` | **17** | 参赛机（现场） |
+| `rmtc-competition-<日期>.zip` | 完整仓库：运行集 + 测试（257 个用例）+ 文档 + 离线实验台 + 网关 + 工具脚本 | 84 | 主办方（提交）/ 队内练习 |
+
+生成方式（**必须用脚本**，不要用 Windows 的"压缩"）：
+
+```bash
+python3 -m scripts.package --runtime --out ../dist --name rmtc-runtime-2026-10-30   # 现场集
+python3 -m scripts.package --out ../dist --name rmtc-competition-2026-10-29          # 完整仓库
+```
+
+现场集的白名单由 `tests/test_runtime_bundle.py` 守住（漏一个文件就会在测试里报错），**不要手动增删**。
+
+现场只做四件事（详见包里的 `RUN_ON_SITE.md`）：设 4 个环境变量 → `python3 -m scripts.preflight` → `python3 -m contestant.bot_node --seat A --stage 2` → 看裁判端"执行 Tick"与"LLM 成功次数"。
+
+---
 ## 0. 先跑起来（30 秒）
 
 > **解释器名字**：Ubuntu 上只有 `python3`（没有 `python`）；Windows 上用 `python`。本文命令一律写 `python3`。

@@ -30,23 +30,43 @@ def tracked_files() -> list:
     return [line for line in out.splitlines() if line.strip()]
 
 
-RUNTIME_DIRS = ("contestant/", "rmtc_client/", "scripts/preflight.py",
-                "scripts/trace_view.py")
-RUNTIME_FILES = ("decision_config.json", "SEALED_VERSION.txt")
+RUNTIME_FILES = (
+    # contestant/：bot_node 及其**运行期真正依赖**（agent 里 lazy import 的 sim.View 也算）
+    "contestant/__init__.py",
+    "contestant/agent.py",
+    "contestant/bot_node.py",
+    "contestant/decision.py",
+    "contestant/planner.py",
+    "contestant/strategy.py",
+    "contestant/tactics.py",
+    "contestant/sim.py",
+    # rmtc_client/：AI 链路全部要
+    "rmtc_client/__init__.py",
+    "rmtc_client/llm_client.py",
+    "rmtc_client/event_understanding.py",
+    "rmtc_client/json_extract.py",
+    # 现场工具
+    "scripts/preflight.py",
+    "scripts/trace_view.py",
+    # 配置与封存
+    "decision_config.json",
+    "SEALED_VERSION.txt",
+)
 RUNTIME_EXTRA = (("docs/RUN_ON_SITE.md", "RUN_ON_SITE.md"),)
 
 
 def runtime_files() -> list:
-    """现场最小集：只含 bot_node / preflight / trace_view 及其依赖。
+    """现场最小集（17 个文件）：只含上场要用的模块。
 
-    刻意**不按 import 闭包裁**（闭包会把离线仿真模块也带进来，且 lazy import
-    在运行期才发现缺文件）。这里按"目录 + 白名单"取，剩 20 个文件左右。
+    刻意**不用 import 闭包自动裁**：闭包会把离线仿真/实验台也带进来，
+    而 lazy import（agent 里的 sweeper / sim.View）又会漏。这里用显式白名单，
+    并由 tests 里的最小集冒烟守住（构建后能在干净目录里 import + 跑一帧决策）。
     """
-    out = []
-    for rel in tracked_files():
-        if rel.startswith(RUNTIME_DIRS) or rel in RUNTIME_FILES:
-            out.append(rel)
-    return out
+    tracked = set(tracked_files())
+    missing = [rel for rel in RUNTIME_FILES if rel not in tracked]
+    if missing:
+        raise SystemExit("运行集里这些文件没被 git 跟踪：" + ", ".join(missing))
+    return list(RUNTIME_FILES)
 
 
 def main() -> int:
