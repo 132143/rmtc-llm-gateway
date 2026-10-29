@@ -30,21 +30,46 @@ def tracked_files() -> list:
     return [line for line in out.splitlines() if line.strip()]
 
 
+RUNTIME_DIRS = ("contestant/", "rmtc_client/", "scripts/preflight.py",
+                "scripts/trace_view.py")
+RUNTIME_FILES = ("decision_config.json", "SEALED_VERSION.txt")
+RUNTIME_EXTRA = (("docs/RUN_ON_SITE.md", "RUN_ON_SITE.md"),)
+
+
+def runtime_files() -> list:
+    """现场最小集：只含 bot_node / preflight / trace_view 及其依赖。
+
+    刻意**不按 import 闭包裁**（闭包会把离线仿真模块也带进来，且 lazy import
+    在运行期才发现缺文件）。这里按"目录 + 白名单"取，剩 20 个文件左右。
+    """
+    out = []
+    for rel in tracked_files():
+        if rel.startswith(RUNTIME_DIRS) or rel in RUNTIME_FILES:
+            out.append(rel)
+    return out
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", default=os.path.join(os.path.dirname(ROOT), "dist"))
     parser.add_argument("--name", default="rmtc-competition-" +
                         datetime.date.today().isoformat())
+    parser.add_argument("--runtime", action="store_true",
+                        help="只打现场运行所需的最小集（不给练习/测试/文档）")
     args = parser.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
     zip_path = os.path.join(args.out, args.name + ".zip")
-    files = tracked_files()
+    files = runtime_files() if args.runtime else tracked_files()
 
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for rel in files:
             zf.write(os.path.join(ROOT, rel.replace("/", os.sep)),
                      arcname=args.name + "/" + rel)
+        if args.runtime:
+            for src, dst in RUNTIME_EXTRA:
+                zf.write(os.path.join(ROOT, src.replace("/", os.sep)),
+                         arcname=args.name + "/" + dst)
 
     digest = hashlib.sha256(open(zip_path, "rb").read()).hexdigest()
     size = os.path.getsize(zip_path)
