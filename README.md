@@ -76,52 +76,72 @@ python3 run_tests.py -v      # → Ran 63 tests / OK
 （资源记忆证伪、对抗分封顶感知、战争期不再空等），外加争格避让 H2。
 收益表内核（fused）保留为可切换枚举，实测未超过原版路径（见 docs/FUSION_REPORT.md 第五节）。
 
-## 1. 目录结构
-
-三块代码互不依赖，可以分开看、分开测：
+## 1. 目录结构（清理后：77 个文件，只留"能跑"和"能讲清楚"的东西）
 
 ```text
 rmtc-llm-gateway/
 │
-├── ① 网关服务端（协议 §5）────────────────────────────
-│   rmtc_gateway/
-│   ├── config.py              全部参数 + 环境变量（RMTC_GW_*）
-│   ├── errors.py              错误码表：状态码 / type / code 三元组
-│   ├── limits.py              额度、在途并发、来源 IP 频率
-│   ├── upstream.py            上游：本地模拟 / 真实 HTTP 转发（不重试）
-│   ├── server.py              两个端点 + 请求校验顺序 + 审计日志
-│   └── __main__.py            python3 -m rmtc_gateway --port 8000
+├── contestant/                ③ 上场跑的参赛程序（纯 Python + 一层 ROS 节点）
+│   ├── agent.py               感知 → 动作：去重、阵亡只 wait、保护期不打、决策顺序
+│   ├── strategy.py            选资源 / 探索（含方案A中心偏置）/ BFS 绕障
+│   ├── planner.py             收益表内核（fused，默认关）
+│   ├── tactics.py             收益参数表（含"哪些参数其实没被读"的清单）
+│   ├── sweeper.py             扫图型假想敌（陪练机器人）
+│   ├── stage2_sim.py          第二阶段离线裁判（按规则 §5.2 结算）
+│   ├── eval_lab.py            对照实验台（分组 × 地图 × 对手 × 重复）
+│   ├── events.py              八种随机事件的公告与效果
+│   ├── llm_replay.py          真实模型判断的回放客户端
+│   ├── map_import.py          裁判地图编辑器格式：导入 / 导出 / 校验
+│   ├── bot_node.py            唯一的 ROS 2 层（话题 / QoS / 回执）
+│   ├── sim.py                 第一阶段离线模拟器
+│   ├── decision.py            decision_type 注册表（6 类 + 3 别名）
+│   └── run_experiments.py     第一阶段策略对比
 │
-├── ② 网关客户端（机器人里用）──────────────────────────
-│   rmtc_client/
-│   ├── llm_client.py          LlmGatewayClient：1.5 s 超时、冷却、预算、按错误码降级
+├── rmtc_client/               ② 机器人里的 AI 客户端
+│   ├── llm_client.py          超时 / 冷却 / 预算 / 按错误码降级 / thinking 关闭
 │   ├── event_understanding.py 公告 → 提示（校验场次与时效）
-│   └── json_extract.py        从模型输出里抠第一个 JSON（字符串感知）
+│   └── json_extract.py        从模型输出里抠第一个 JSON
 │
-├── ③ 参赛程序（上场跑的）──────────────────────────────
-│   contestant/
-│   ├── agent.py               感知 → 动作：tick/session 去重、阵亡只能 wait、攻击判定
-│   ├── strategy.py            策略：snake（原骨架）/ GreedyBfs（记忆+BFS 绕障）
-│   ├── bot_node.py            ROS 2 节点（唯一依赖 rclpy 的一层）
-│   ├── sim.py                 第一阶段离线模拟器（按官方 stage1.json 参数）
-│   └── run_experiments.py     策略对比实验：官方图 + N 张随机图
+├── rmtc_gateway/              ① 协议 §5 网关服务端（本地练习/审计用）
 │
-├── 测试（按上面三块分文件）─────────────────────────────
-│   tests/test_gateway.py      ①  26 个：每个错误码、配额、并发、审计
-│   tests/test_client.py       ②  19 个：超时/降级/退避/公告理解/JSON 抽取
-│   tests/test_contestant.py   ③  18 个：模拟器、策略、Agent、9×9 解析、撞墙回灌
-│   run_tests.py               一条命令跑完 63 个测试
+├── tests/                     247 个用例，按上面三块分文件
+├── examples/llm_demo.py       不用 ROS 的客户端演示
 │
-├── 文档与脚本
-│   docs/PROTOCOL_MAP.md       协议条款 → 代码 → 测试 的对照表
-│   docs/STRATEGY_NOTES.md     策略实验记录（每次测了什么、结论）
-│   docs/MATCH_LOG.md          官方练习裁判真机实测（得分、踩到的坑、怎么复现）
-│   docs/practice_stage1.json  官方练习包的 stage1 地图配置（原样拷入）
-│   scripts/vm/                在虚拟机里一键跑对局的脚本（runmatch*.sh）
-│   examples/llm_demo.py       不用 ROS 的网关演示
-│   start_gateway.sh           虚拟机里启动网关
+├── docs/
+│   ├── onboarding/00~05       ★ 给"刚学会 ROS+CMake"的人：比赛是什么 / 代码怎么搭 / 一次决策全程 / 怎么改 / 答辩 / 索引
+│   ├── FUSION_REPORT.md       二十一轮实验的全部结论（含被数据否掉的方案）
+│   ├── COMPLIANCE.md          规则逐条对照（v1.2）+ 上场手册
+│   ├── SUBMISSION_CHECKLIST.md 提交清单（材料 / 检录四张截图 / 三项待办）
+│   ├── TECH_REPORT.md         技术报告模板（语雀 md）
+│   ├── ADOPTION_20261028.md   方案A（中心偏置 + 经济窗口）采纳记录与独立复现
+│   ├── GATEWAY_THINKING_20261028.md 官方网关口径（thinking/max_tokens/不填 model）
+│   ├── EXPLORATION_ISSUE.md   低分 18.9 的解剖与修法（可反驳）
+│   ├── results/               最近两次对照实验的原始摘要（可复核）
+│   ├── maps/                  示例地图（编辑器格式，可直接手改）
+│   ├── events_cache.json      真实模型判断的回放缓存（事件链离线验证用）
+│   └── practice_stage1/2.json 官方练习包地图配置（原样拷入）
+│
+├── scripts/                   只用 10 个工具脚本
+│   ├── repo_scan.py           密钥 / 语法 / 未导入 / 文档数字一致 / 死函数
+│   ├── stress_sweep.py        随机地图 + 畸形感知压力扫描
+│   ├── analyze_lab.py         成对统计（置信区间 + 符号检验）
+│   ├── loss_report.py         丢任务概率
+│   ├── rescore.py             练习分（300 口径）→ 正式 v1.2（500 口径）
+│   ├── map_tool.py            裁判地图编辑器互通（导出 / 校验 / 直接跑）
+│   ├── record_llm_hints.py    录制真实模型判断（重录缓存用）
+│   ├── gen_maps.py / gen_stage2.py  造练习地图与配置
+│   └── package.py             打交付 zip
+│
+├── run_tests.py               一条命令跑完 247 个用例 + 全量语法检查
+├── decision_config.json       现场唯一允许改的文件（decision_type）
+├── SEALED_VERSION.txt         封存记录（commit / tag / 质量门 / 一键回滚）
+├── PROJECT_MANIFEST.json      机器可读清单（文件数 / 测试数 / 结构）
 └── README.md
 ```
+
+**2026-10-28 清理说明**：删掉了开发期的 `scripts/vm/`（10 个一次性对局脚本）、`docs/experiments/`（81 个历史批次原始 JSON，
+结论已全部写进 `docs/FUSION_REPORT.md`）、`docs/sweep_*`（造图中间产物）、`docs/evidence/`（旧截图）以及
+9 份被 FUSION_REPORT / onboarding 取代的历史文档。这些内容都在 git 历史里（`git log --all -- <路径>` 可取回）。
 
 只跑某一块的测试：
 

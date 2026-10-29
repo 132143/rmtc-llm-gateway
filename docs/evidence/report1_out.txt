@@ -1,6 +1,0 @@
-finished: True tick: 100 / 100
-{"team": "A", "team_name": "A", "score": 40.0, "resource_value": 200.0, "effective_damage": 0.0, "mission_completed": 0, "invalid_actions": 0, "hp": 100, "alive": true}
-checks A: {"perception_tick": 100, "position": [4, 8], "last_action": {"action": "wait", "moved": false, "tick": 99}, "event_text": "", "action_tick": 100, "executed_tick": 99}
-感知 101 条 / 动作 101 条
-最后感知 score: {"effective_damage": 0.0, "invalid_actions": 0, "mission_completed": 0, "mission_completed_ids": [], "resource_value": 200}
-最后 self: {"position": [4, 8], "hp": 100, "alive": true, "last_action": {"action": "wait", "moved": false, "tick": 99}}
