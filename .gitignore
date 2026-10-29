@@ -9,6 +9,16 @@ venv/
 gateway-audit*.jsonl
 audit-test.jsonl
 
-# 编辑器
+# 编辑器 / IDE
 .idea/
 .vscode/
+*.swp
+
+# 离线实验与打包产物（可复跑，不进仓库）
+docs/experiments/
+dist/
+*.zip
+*.tgz
+
+# 本机临时目录
+_tmp/
