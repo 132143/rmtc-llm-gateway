@@ -2,8 +2,8 @@
 
 | 项 | 值 |
 |---|---|
-| **封存代码 commit**（tag 指向它） | `d6488e789cc94a98efd5ae7ccf753b8d943fe611` |
-| 短哈希 | `d6488e7` |
+| **封存代码 commit**（tag 指向它） | `001f43a60c23f5aa4fca58136ec87a9efb998f08` |
+| 短哈希 | `001f43a` |
 | 标签 | `seal-v1.2-20261029b`（annotated） |
 | 规则版本 | 赛事规则 **v1.2** + 通信协议 **v1.1** |
 | 策略默认 | `planner=guarded` + `combat_mode=hybrid` + **方案A**：`center_pull=0.8 / center_pull_ticks=60 / econ_guard=60` |
