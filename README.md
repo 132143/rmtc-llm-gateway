@@ -475,18 +475,20 @@ cd ~/rmtc-llm-gateway && python3 run_tests.py
 
 ## 11. 交接与移植（给队友）
 
-**先读根目录的 [HANDOVER.md](HANDOVER.md)** —— 完整交接文档：当前状态、比赛方案、参数表、
-成绩与实验证据、踩过的坑与"不要再试"清单、提交材料、合并规范、下一步。
-
 | 文档 | 用途 |
 |---|---|
-| [docs/HANDOVER_FOR_TEAMMATE.md](docs/HANDOVER_FOR_TEAMMATE.md) | **给队友（和他的 LLM）**：目录分工、不能破的协议清单、已验证结论、合并规范 |
-| [docs/COMPETITION_PLAN.md](docs/COMPETITION_PLAN.md) | 封存参数表：上场到底按什么跑、三种 decision_type 怎么选、预期成绩 |
-| [docs/PORTABILITY.md](docs/PORTABILITY.md) | Windows / Ubuntu 双系统：哪些能跑、编码换行、无绝对路径自查 |
-| [PROJECT_MANIFEST.json](PROJECT_MANIFEST.json) | 机器可读清单：模块、入口、接口、测试、实测结论（给另一个 LLM 读） |
-| [docs/SUBMISSION_CHECKLIST.md](docs/SUBMISSION_CHECKLIST.md) | **提交清单**：交什么/什么形式/多少份、四张前置检录截图、镜像可选做法 |
-| [docs/TECH_REPORT.md](docs/TECH_REPORT.md) | 语雀技术报告模板（含实测数据表，可直接粘贴） |
-| [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md) | 四组实验：事件压测 / 开局博弈 / 最终统计 / 强对手锦标赛（v1.1 口径） |
+| [docs/onboarding/00_怎么读.md](docs/onboarding/00_怎么读.md) | **从这里开始**：6 篇教学文档的阅读顺序与用时 |
+| [docs/onboarding/](docs/onboarding/) | 比赛是什么 / 代码怎么搭 / 一次决策全程 / 怎么改代码 / 答辩准备 |
+| [docs/FUSION_REPORT.md](docs/FUSION_REPORT.md) | 二十一轮实验的全部结论，含"被数据否掉、不要再试"清单 |
+| [docs/COMPLIANCE.md](docs/COMPLIANCE.md) | 规则 v1.2 逐条对照 + 上场手册 + 官方网关口径 |
+| [docs/SUBMISSION_CHECKLIST.md](docs/SUBMISSION_CHECKLIST.md) | **提交清单**：交什么/什么形式、四张检录截图、三项待办 |
+| [docs/TECH_REPORT.md](docs/TECH_REPORT.md) | 语雀技术报告模板（分工 / 构建思路 / AI 协同 / 截图） |
+| [docs/VM_VERIFY_20261029.md](docs/VM_VERIFY_20261029.md) | 真机复验记录：分数、AI 成功次数、复现命令、踩过的两个坑 |
+| [docs/ADOPTION_20261028.md](docs/ADOPTION_20261028.md) | 方案A（中心偏置 + 经济窗口）采纳记录与独立复现 |
+| [docs/GATEWAY_THINKING_20261028.md](docs/GATEWAY_THINKING_20261028.md) | 官方网关口径：thinking 关闭、max_tokens、不填 model |
+| [SEALED_VERSION.txt](SEALED_VERSION.txt) | 封存 commit / tag / 质量门 / 一键回滚 |
+| [PROJECT_MANIFEST.json](PROJECT_MANIFEST.json) | 机器可读清单（给另一个 LLM 读） |
+
 
 ## 12. 规则怎么读、现场怎么用
 
