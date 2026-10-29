@@ -53,6 +53,27 @@ class ClientConfig:
     json_mode: bool = True        # 让模型只输出 JSON（减少解析失败）
 
 
+def _normalize_chat_url(url: str) -> str:
+    """把现场可能给错的网关地址补成完整的 chat/completions 地址。
+
+    兼容三种写法（其余原样返回，交给上游判断）：
+        http://host:8080                      → http://host:8080/v1/chat/completions
+        http://host:8080/v1                   → http://host:8080/v1/chat/completions
+        http://host:8080/v1/chat/completions  → 原样
+    """
+    text = str(url or "").strip()
+    if not text:
+        return text
+    trimmed = text.rstrip("/")
+    if trimmed.endswith("/chat/completions"):
+        return trimmed
+    if trimmed.endswith("/v1"):
+        return trimmed + "/chat/completions"
+    if "://" in trimmed and trimmed.split("://", 1)[1].find("/") == -1:
+        return trimmed + "/v1/chat/completions"
+    return trimmed
+
+
 @dataclass
 class LlmResult:
     ok: bool
@@ -101,6 +122,9 @@ class LlmGatewayClient:
                              "（客户端不会用任何默认令牌，避免静默 401 导致 AI 资格丢失）")
         if not str(getattr(self.cfg, "url", "") or "").strip():
             raise ValueError("缺少网关地址：请设置环境变量 RMTC_AI_URL 后再启动")
+        # 万全：现场给的地址可能是 基址 / 基址+v1 / 完整 chat 地址 三种写法，统一成完整地址。
+        # （只补路径，不改主机名与协议；令牌不在 URL 里，所以日志里打印归一化后的地址是安全的）
+        self.cfg.url = _normalize_chat_url(self.cfg.url)
         self._logger = logger
         self._lock = threading.Lock()
         self._degraded: str = ""          # 非空表示已停用
@@ -193,10 +217,20 @@ class LlmGatewayClient:
             # 最多额外重试 2 次：response_format 与 thinking 两个"可选字段被上游拒绝"各允许回退一次。
             # 400 不产生 2xx、不消耗网关成功配额（规则 §11.3 只按成功调用记账），所以回退重试不白烧额度；
             # 反过来，如果因为一个可选字段就让整场放弃 AI，等于直接丢掉任务分 15 分（规则 §10.2）。
+            # 万全策略：不确定上游到底认哪些字段，就按"字段价值"从高到低逐级降级，
+            # 任何一级成功就停（AI 资格只要 1 次成功，规则 §10.2）。最多 3 次调用。
+            #   ① 全量（thinking 关 + json_object）
+            #   ② 去掉被拒的那个可选字段
+            #   ③ 最小请求（只有 messages + max_tokens）
             result = None
             for _ in range(3):
                 result = self._ask_once(prompt, messages, timeout_s, max_tokens)
-                if result.code not in ("json_mode_rejected", "thinking_rejected"):
+                if result.ok:
+                    return result
+                # 不可重试的失败（令牌无效/额度用尽/超时/预算/冷却）直接返回，不白烧额度
+                if result.is_fatal or result.code in ("local_timeout", "budget", "cooldown"):
+                    return result
+                if not self._drop_optional_field(result):
                     return result
             return result
         finally:
@@ -322,6 +356,37 @@ class LlmGatewayClient:
             with self._lock:
                 self._last_code = code
         return self._fail(code, exc.code, message, started)
+
+    def _drop_optional_field(self, result) -> bool:
+        """上一次失败后，决定丢掉哪个"可选字段"再试。返回 False 表示无字段可丢。"""
+        message = (result.message or "").lower()
+        code = (result.code or "").lower()
+        # 已经被 _on_http_error 明确标出的情况优先
+        if code == "thinking_rejected" or "thinking" in message:
+            if self.cfg.disable_thinking and not self._thinking_off:
+                with self._lock:
+                    self._thinking_off = True
+                self._log("warn", "上游不接受 thinking 字段，本场改为默认思考模式后重试")
+                return True
+        if code == "json_mode_rejected" or "json_object" in message or "response_format" in message:
+            if self.cfg.json_mode and not self._json_mode_off:
+                with self._lock:
+                    self._json_mode_off = True
+                self._log("warn", "上游不接受 json_object 输出模式，本场改用普通输出后重试")
+                return True
+        # 兜底：400 但看不出是哪个字段 → 先丢 thinking，再丢 json_object
+        if str(result.status) == "400" or code == "http_400":
+            if self.cfg.disable_thinking and not self._thinking_off:
+                with self._lock:
+                    self._thinking_off = True
+                self._log("warn", "上游 400 但未说明字段，先降级为默认思考模式重试")
+                return True
+            if self.cfg.json_mode and not self._json_mode_off:
+                with self._lock:
+                    self._json_mode_off = True
+                self._log("warn", "上游仍 400，再降级为普通输出重试")
+                return True
+        return False
 
     def _fail(self, code: str, status: int, message: str, started: float) -> LlmResult:
         latency = (time.perf_counter() - started) * 1000.0

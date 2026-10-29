@@ -149,6 +149,30 @@ class TestGatewayPayload(unittest.TestCase):
             self.assertNotIn("thinking", gateway.requests[1]["body"])   # 回退后不再发
             self.assertEqual(client.thinking_mode, "default")
 
+    def test_url_is_normalized(self):
+        """现场可能给基址 / 基址+v1 / 完整地址三种写法，都要能用。"""
+        from rmtc_client.llm_client import _normalize_chat_url
+        self.assertEqual(_normalize_chat_url("http://h:8080"),
+                         "http://h:8080/v1/chat/completions")
+        self.assertEqual(_normalize_chat_url("http://h:8080/v1"),
+                         "http://h:8080/v1/chat/completions")
+        self.assertEqual(_normalize_chat_url("http://h:8080/v1/chat/completions/"),
+                         "http://h:8080/v1/chat/completions")
+        self.assertEqual(_normalize_chat_url("https://api.x.com/v1/chat/completions"),
+                         "https://api.x.com/v1/chat/completions")
+
+    def test_unknown_400_degrades_fields_then_succeeds(self):
+        """万全：上游 400 但没说哪个字段 → 先丢 thinking，再丢 json_object，最后成功。"""
+        with FakeGateway(script=[
+                {"status": 400, "payload": error_payload("bad request", 400)},
+                {"status": 200, "payload": completion("{\"ok\":true}")}]) as gateway:
+            client = make_client(gateway.url)
+            result = client.ask("请只输出 JSON：{\"ok\":true}")
+            self.assertTrue(result.ok, result)
+            self.assertEqual(len(gateway.requests), 2)
+            self.assertIn("thinking", gateway.requests[0]["body"])
+            self.assertNotIn("thinking", gateway.requests[1]["body"])
+
     def test_env_can_keep_thinking_on(self):
         with FakeGateway() as gateway:
             client = make_client(gateway.url, disable_thinking=False,
