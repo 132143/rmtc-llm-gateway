@@ -119,6 +119,20 @@ class RmtcBotNode(Node):
             String, f"/team_{seat}/registration", qos_profile(DurabilityPolicy.TRANSIENT_LOCAL))
         self.create_timer(5.0, self.publish_registration)
         self.publish_registration()
+        # 协议 §12.1 还给了两个"官方文本通道"：/referee/mission（自然语言任务）与
+        # /referee/event_text（逐条公告，TRANSIENT_LOCAL 深度 128）。
+        # 感知里的 event_text 只是"近期公告"，晚 join 或公告密集时可能被窗口截断；
+        # 只吃感知 = 极端情况下一条公告都看不到 → 一次真实 AI 调用都没有 → 任务分 0（规则 §10.2）。
+        # 所以这里两路都收：话题做"逐条缓冲"，与感知文本合并去重后交给模型。
+        self.event_lines = []
+        self.mission_line = ""
+        text_qos = QoSProfile(depth=128,
+                              history=HistoryPolicy.KEEP_ALL,
+                              reliability=ReliabilityPolicy.RELIABLE,
+                              durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self.create_subscription(String, "/referee/event_text", self.on_event_text, text_qos)
+        self.create_subscription(String, "/referee/mission", self.on_mission_text,
+                                 qos_profile(DurabilityPolicy.TRANSIENT_LOCAL))
         # 失联看门狗：现场最常见的坑是"以为连上了"，其实是 QoS/域号/发现没通。
         self.last_perception_at = None
         self.started_at = self.get_clock().now()
@@ -151,6 +165,40 @@ class RmtcBotNode(Node):
         message.data = json.dumps({"team": self.seat, "name": self.team_name}, ensure_ascii=False)
         self.registration.publish(message)
 
+    def on_event_text(self, msg):
+        """公告话题逐条到达：按行拆分、保留最近 40 条（协议：同一 Tick 可能多条）。"""
+        try:
+            text = str(msg.data or "").strip()
+        except Exception:
+            return
+        if not text:
+            return
+        for line in text.splitlines():
+            line = line.strip()
+            if line and line not in self.event_lines:
+                self.event_lines.append(line)
+        self.event_lines = self.event_lines[-40:]
+
+    def on_mission_text(self, msg):
+        try:
+            self.mission_line = str(msg.data or "").strip()
+        except Exception:
+            self.mission_line = ""
+
+    def merged_event_text(self, data):
+        """把"感知里的近期公告"和"话题里的逐条公告"合并（保持时间顺序、按行去重）。"""
+        perception_text = data.get("event_text") if isinstance(data, dict) else ""
+        perception_text = perception_text if isinstance(perception_text, str) else ""
+        merged = []
+        for line in perception_text.splitlines():
+            line = line.strip()
+            if line and line not in merged:
+                merged.append(line)
+        for line in self.event_lines:
+            if line not in merged:
+                merged.append(line)
+        return "\n".join(merged[-40:])
+
     def on_perception(self, msg):
         self.last_perception_at = self.get_clock().now()
         try:
@@ -158,6 +206,11 @@ class RmtcBotNode(Node):
         except (TypeError, ValueError) as exc:
             self.get_logger().warn(f"感知不是合法 JSON：{exc}")
             return
+        if isinstance(data, dict):
+            # 感知文本 + 话题文本合并；任务文本缺失时用话题里的
+            data["event_text"] = self.merged_event_text(data)
+            if not str(data.get("mission_text") or "").strip() and self.mission_line:
+                data["mission_text"] = self.mission_line
         try:
             action = self.agent.on_perception(data)
         except Exception as exc:                      # 协议要求：解析异常不能让进程退出

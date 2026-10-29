@@ -20,7 +20,7 @@
 | 包 | 内容 | 文件数 | 给谁 |
 |---|---|---|---|
 | `rmtc-runtime-<日期>.zip` | **只有上场要用的**：`contestant/`（8 个运行期模块）+ `rmtc_client/`（4）+ `scripts/preflight.py`、`scripts/trace_view.py` + `decision_config.json` + `SEALED_VERSION.txt` + `RUN_ON_SITE.md` | **17** | 参赛机（现场） |
-| `rmtc-competition-<日期>.zip` | 完整仓库：运行集 + 测试（257 个用例）+ 文档 + 离线实验台 + 网关 + 工具脚本 | 84 | 主办方（提交）/ 队内练习 |
+| `rmtc-competition-<日期>.zip` | 完整仓库：运行集 + 测试（262 个用例）+ 文档 + 离线实验台 + 网关 + 工具脚本 | 84 | 主办方（提交）/ 队内练习 |
 
 生成方式（**必须用脚本**，不要用 Windows 的"压缩"）：
 
