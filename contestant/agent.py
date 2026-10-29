@@ -65,7 +65,8 @@ class AgentConfig:
                  high_value_scale=1.0, high_first_ticks=250, race_guard=False,
                  race_history_ticks=12, race_weak_hp=40, race_weak_ratio=0.6,
                  patrol_skip_reached=False, late_cap_guard=False, early_quiet=0,
-                 cap_retreat_hp=0, center_pull=0.8, center_pull_ticks=60, econ_guard=60):
+                 cap_retreat_hp=0, center_pull=0.8, center_pull_ticks=60, econ_guard=60,
+                 idle_patrol=True):
         self.seat = seat
         self.stage = stage
         self.max_hp = max_hp
@@ -158,6 +159,10 @@ class AgentConfig:
         self.center_pull_ticks = int(center_pull_ticks or 0)
         # econ_guard：前 N 片内"还有资源可采"时不为换血攻击（只让路给采集，不是一律不开火）。
         self.econ_guard = int(econ_guard or 0)
+        # idle_patrol：没事可做时（无可采资源、无可探明格）**继续巡逻**而不是原地 wait。
+        # 分数上等价（无资源可捡时巡逻不加分），但避免"看起来卡死"，且在"资源被视觉遮挡/漏收"
+        # 的边缘情形下仍有机会补到。默认开；巡逻路径是确定性的蛇形，不会来回抖。
+        self.idle_patrol = bool(idle_patrol)
         # 门控：只在封存默认档（guarded + hybrid）生效；economy/turtle/center_grab 保持旧行为，
         # 现场切换 decision_type 就等于一键回滚。
         self._adopted_default = (planner == "guarded" and combat_mode == "hybrid")
@@ -1184,11 +1189,21 @@ class Agent:
             if direction:
                 return self._move(direction)
         if action.get("action") not in ATTACK_ACTIONS:
+            if self.cfg.idle_patrol:
+                step = self._idle_patrol_step()
+                if step:
+                    return self._move(step)
             return {"action": "wait"}
         if action.get("action") == "move":
             if action.get("direction") not in DIRECTIONS:
                 return {"action": "wait"}
             return self._move(action["direction"])
+        if action.get("action") == "wait" and self.cfg.idle_patrol:
+            # 注意：wait 在 ATTACK_ACTIONS 里，所以必须在"未知动作"分支之外单独处理，
+            # 否则这条兜底永远不会生效（第一版就写错了，被单测抓住）。
+            step = self._idle_patrol_step()
+            if step:
+                return self._move(step)
         return action
 
     def _mission_resource_move(self, data):
@@ -1527,6 +1542,36 @@ class Agent:
     # 规则 §8.3「幻术」：MOVE 的 up/down、left/right 互换，ATTACK 的方向不反转。
     # 这个效果只能靠 LLM 理解公告得出（禁止关键词解析），所以这里消费模型输出。
     _OPPOSITE = {"up": "down", "down": "up", "left": "right", "right": "left"}
+
+    def _idle_patrol_step(self):
+        """没事可做时的确定性蛇形巡逻：保证"有事做"而不是原地 wait。
+
+        为什么加这个：第一阶段把 16 个资源全捡完后，explore() 没有目标 → 返回 wait →
+        车在最后 20~30 片一动不动（实测 tick 76 起连等 25 片）。分数上无损，但
+        ① 看起来像卡死；② 万一有资源被视野边角漏掉就永远补不到。
+        蛇形顺序是固定的（不随机、不来回抖），撞到障碍/车辆就跳过继续下一个目标。
+        """
+        if self.pos is None or not (self.width and self.height):
+            return None
+        if not hasattr(self, "_patrol_order"):
+            order = []
+            for y in range(self.height):
+                xs = range(self.width) if y % 2 == 0 else range(self.width - 1, -1, -1)
+                order.extend((x, y) for x in xs)
+            self._patrol_order = order
+            self._patrol_index = 0
+        order = self._patrol_order
+        blocked = self._blocked_now()
+        for _ in range(len(order)):
+            cell = order[self._patrol_index % len(order)]
+            self._patrol_index += 1
+            if cell == self.pos or cell in blocked:
+                continue
+            direction = step_toward(self.pos, cell, blocked, self.width, self.height)
+            if direction:
+                self.patrol_moves += 1
+                return direction
+        return None
 
     def _move(self, direction):
         """记下"这一步从哪走、往哪走"，下一帧用它解释 E_BLOCKED。

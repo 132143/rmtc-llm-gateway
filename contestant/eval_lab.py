@@ -59,6 +59,9 @@ GROUPS = {
     # 融合版（guarded）：原版决策路径 + 记忆证伪 + 封顶感知 + 战争期不再空等
     "guarded_hybrid": {"kind": "combo", "planner": "guarded", "combat_mode": "hybrid",
                        "memory_falsify": True},
+    # 对照：关掉空闲巡逻（回到"没事就原地 wait"）
+    "guarded_noidle": {"kind": "combo", "planner": "guarded", "combat_mode": "hybrid",
+                       "memory_falsify": True, "idle_patrol": False},
     # 对照：方案A 之前的封存行为（center_pull/econ_guard 都关）
     "guarded_prev": {"kind": "combo", "planner": "guarded", "combat_mode": "hybrid",
                      "memory_falsify": True, "center_pull": 0.0, "econ_guard": 0},
@@ -177,6 +180,9 @@ OPPONENTS = {
     "probe_mid": {"planner": "legacy", "combat_mode": "hybrid"},
     "probe_farmer": {"planner": "legacy", "combat_mode": "never"},
     "probe_strong": {"planner": "fused", "combat_mode": "hybrid"},
+    # 真正的"镜像对手"：与封存默认档**逐字段相同**（guarded + hybrid + 记忆证伪）。
+    # 之前的 probe_mid 其实是 legacy（原版基线），拿它当对手会高估我们。
+    "probe_mirror": {"planner": "guarded", "combat_mode": "hybrid", "memory_falsify": True},
     # 扫图型假想敌：移动优先 + 扫遍全图 + 拿最近资源 + 打一下就跑（contestant/sweeper.py）
     "probe_sweep": {"planner": "sweeper", "combat_mode": "opportunistic"},
 }
