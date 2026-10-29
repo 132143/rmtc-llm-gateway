@@ -9,8 +9,8 @@
 
 ```bash
 cd rmtc-llm-gateway
-python run_tests.py            # 必须 Ran 253 tests → OK
-python -m scripts.repo_scan    # 必须 5 行 [OK]
+python3 run_tests.py            # 必须 Ran 253 tests → OK
+python3 -m scripts.repo_scan    # 必须 5 行 [OK]
 ```
 
 任何一项不过 → **先修环境，别开实验**（脏基线会让所有对比作废）。
@@ -39,7 +39,7 @@ def __init__(self, ..., my_new_rule=False):     # 默认关
 
 ### 1.3 写测试（必须）
 
-至少 3 条：**开关关 = 旧行为**、**开关开 = 新行为**、**边界不崩**。放 `tests/`，跑 `python -m unittest tests.test_你的文件 -v`。
+至少 3 条：**开关关 = 旧行为**、**开关开 = 新行为**、**边界不崩**。放 `tests/`，跑 `python3 -m unittest tests.test_你的文件 -v`。
 
 ---
 
@@ -48,7 +48,7 @@ def __init__(self, ..., my_new_rule=False):     # 默认关
 ### 2.1 标准批次（96 局/组，约 6 分钟）
 
 ```bash
-python -m contestant.eval_lab \
+python3 -m contestant.eval_lab \
   --groups guarded_hybrid,guarded_mine \
   --envs open24,dense24,maze24,practice18 \
   --opponents probe_mirror,probe_weak,probe_farmer,probe_strong \
@@ -68,10 +68,10 @@ python -m contestant.eval_lab \
 
 ```bash
 # ① 成对比较：均值差 + 95% 置信区间 + 符号检验
-python -m scripts.analyze_lab docs/experiments/mine/lab_raw.json guarded_hybrid guarded_mine
+python3 -m scripts.analyze_lab docs/experiments/mine/lab_raw.json guarded_hybrid guarded_mine
 
 # ② 丢任务概率（任务分是 15 分的大头）
-python -m scripts.loss_report docs/experiments/mine/lab_raw.json guarded_hybrid guarded_mine
+python3 -m scripts.loss_report docs/experiments/mine/lab_raw.json guarded_hybrid guarded_mine
 
 # ③ 自己算 P10 / P(score<30) / 最低分（别只看均值）
 python - <<'PY'
@@ -158,10 +158,10 @@ curl -s -X POST http://127.0.0.1:8080/api/resume -d '{}'
 
 | 想知道 | 命令 |
 |---|---|
-| 这局它怎么跑的 | `python -m scripts.trace_view /tmp/trace_A.jsonl --summary`（加 `--every 25` 看每帧） |
-| 练习分数换算成正式口径 | `python -m scripts.rescore /tmp/state.json` |
-| 场地地图能不能用 | `python -m scripts.map_tool check --file map.json` |
-| 压力扫描（畸形感知/确定性） | `python -m scripts.stress_sweep --stage1 40 --stage2 16 --events-both --junk 1200` |
+| 这局它怎么跑的 | `python3 -m scripts.trace_view /tmp/trace_A.jsonl --summary`（加 `--every 25` 看每帧） |
+| 练习分数换算成正式口径 | `python3 -m scripts.rescore /tmp/state.json` |
+| 场地地图能不能用 | `python3 -m scripts.map_tool check --file map.json` |
+| 压力扫描（畸形感知/确定性） | `python3 -m scripts.stress_sweep --stage1 40 --stage2 16 --events-both --junk 1200` |
 
 ---
 

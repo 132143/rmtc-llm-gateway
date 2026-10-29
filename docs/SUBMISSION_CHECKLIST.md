@@ -4,7 +4,7 @@
 > **计分数字未变**：资源分 `30 × min(R2/120, 1)`、对抗分 `15 × min(D/500, 1)`、任务分 `5 × M`（M 需本场真实 AI 调用资格）。
 >
 > ⚠️ **练习裁判仍按旧口径（`D/300`）算分**。看练习分数必须换算，否则会误判"我满分了"：
-> 用 `python -m scripts.rescore <裁判 state.json>` 直接给出两种口径的对照（示例：伤害 400 时练习报 42.5，正式口径 39.5）。
+> 用 `python3 -m scripts.rescore <裁判 state.json>` 直接给出两种口径的对照（示例：伤害 400 时练习报 42.5，正式口径 39.5）。
 
 ## 1. 递交什么、以什么形式、多少份
 
@@ -22,8 +22,8 @@
 ## 2. 代码侧"提交即现场"的一致性
 
 - 封存 commit：`SEALED_VERSION.txt` 里的哈希（`git rev-parse HEAD` 应与之相同）；
-- `python run_tests.py` 必须全绿（当前 **253 个用例** + 当前 51 个 .py 的全量语法检查）；
-- `python -m scripts.repo_scan` 四行 `[OK]`（密钥/语法/未导入/死函数）；
+- `python3 run_tests.py` 必须全绿（当前 **253 个用例** + 当前 51 个 .py 的全量语法检查）；
+- `python3 -m scripts.repo_scan` 四行 `[OK]`（密钥/语法/未导入/死函数）；
 - **官方 10-28 明确：现场启动的代码必须与检录前提交的一致**（"现场启动哪个就提交哪个"）→ 封存后到现场之间不得再有代码改动；
 - 现场只允许改：环境变量（席位/令牌/网关地址/域号）+ `decision_config.json` 的 `decision_type` + 裁判批准的切换；**不改源码**。
 - **令牌/网关地址不再有默认值**：没设 `RMTC_TEAM_TOKEN` / `RMTC_AI_URL` 时，第二阶段启动会直接报错退出（而不是静默 401 丢 15 分）。
@@ -47,14 +47,14 @@ v1.2 已删除"容器镜像提交"要求；Q&A 第 4 问也只说"会 docker 就
 
 ## 5. 赛前 30 分钟现场核对
 
-0. `python -m scripts.preflight` 全绿（六项：环境变量 / 网关 / 真实 AI / decision_type / 封存 / 令牌不外泄）；
+0. `python3 -m scripts.preflight` 全绿（六项：环境变量 / 网关 / 真实 AI / decision_type / 封存 / 令牌不外泄）；
 
 1. `git rev-parse HEAD` 与 `SEALED_VERSION.txt` 一致；
 2. `cat decision_config.json`：只有 `decision_type` 一个键，值在登记表里；
 3. 环境变量齐全：`ROS_DOMAIN_ID` / `ROS_LOCALHOST_ONLY=0` / `RMW_IMPLEMENTATION` / `RMTC_SEAT` / **`RMTC_TEAM_TOKEN`** / **`RMTC_AI_URL`**；
 4. `curl <网关>/healthz` 返回 200；
 5. 先 `--dry-run` 看解析，再正式启动；按 §3 四张截图逐一核对；
-6. 练习分数若要对外引用，先跑一次 `python -m scripts.rescore` 换成 v1.2 口径。
+6. 练习分数若要对外引用，先跑一次 `python3 -m scripts.rescore` 换成 v1.2 口径。
 
 ## 6. 三项待办（10/31 20:00 前完成）
 

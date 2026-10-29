@@ -1,7 +1,7 @@
 # 融合报告：策略 × 现有代码（规则 v1.1）
 
 > 本文回答四件事：**规则怎么算分、原版代码强在哪弱在哪、各套策略实测谁赢、最后的封存版本长什么样**。
-> 所有数字都来自本仓库可复现的实验（python -m contestant.eval_lab，产物在 docs/experiments/）。
+> 所有数字都来自本仓库可复现的实验（python3 -m contestant.eval_lab，产物在 docs/experiments/）。
 > 规则依据一律标条款号，正文数值以《赛事规则 v1.1》《通信协议 v1.1》原文为准。
 
 ---
@@ -238,9 +238,9 @@
 
 | # | 检查 | 命令 | 通过标准 | 本次结果 |
 |---|---|---|---|---|
-| 1 | 语法（全量） | python run_tests.py | 41 个 .py 全通过 | ✅ |
-| 2 | 单元测试 | python run_tests.py | 119 → 156 全绿 | ✅ |
-| 3 | 第一阶段回归 | python -m contestant.run_experiments --maps 60 | 官方图 40.0、60 图均值约 33.2 | ✅ 与原版一致 |
+| 1 | 语法（全量） | python3 run_tests.py | 41 个 .py 全通过 | ✅ |
+| 2 | 单元测试 | python3 run_tests.py | 119 → 156 全绿 | ✅ |
+| 3 | 第一阶段回归 | python3 -m contestant.run_experiments --maps 60 | 官方图 40.0、60 图均值约 33.2 | ✅ 与原版一致 |
 | 4 | 真机第一阶段（虚拟机官方裁判） | run_stage1.sh | 40.0/40、非法动作 0 | ✅ 40.0（200/200） |
 | 4b | 真机第二阶段（mock AI，200 Tick） | run_stage2.sh | 名次≥2、非法动作 0 | ✅ 42.5（1/4，任务 3/3） |
 | 4c | 真机第二阶段（**真实 DeepSeek**） | run_real2.sh | AI success_count ≥1、非法动作 0 | ✅ 45.0（1/4，success 10/10，任务 3/3） |
@@ -286,10 +286,10 @@
 ## 九、怎么复跑
 
 ```
-python run_tests.py                                   # 156 个测试 + 全量语法检查
-python -m contestant.run_experiments --maps 60         # 第一阶段回归
-python -m contestant.eval_lab --reps 3 --ticks 500     # 全部对照实验（约 30-40 分钟）
-python -m contestant.eval_lab --groups guarded_hybrid,baseline_hybrid --reps 4   # 两组快速对照
+python3 run_tests.py                                   # 156 个测试 + 全量语法检查
+python3 -m contestant.run_experiments --maps 60         # 第一阶段回归
+python3 -m contestant.eval_lab --reps 3 --ticks 500     # 全部对照实验（约 30-40 分钟）
+python3 -m contestant.eval_lab --groups guarded_hybrid,baseline_hybrid --reps 4   # 两组快速对照
 ```
 
 说明：fused 内核（planner.py / tactics.py）默认不参与决策（planner=guarded），它是可切换的已登记能力，

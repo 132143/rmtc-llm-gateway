@@ -57,8 +57,8 @@
 ## 六、可复现（给评委）
 
 ```bash
-python run_tests.py                       # 110 个测试 + 全量语法检查
-python -m rmtc_gateway --port 8000        # 本地网关（可选）
+python3 run_tests.py                       # 110 个测试 + 全量语法检查
+python3 -m rmtc_gateway --port 8000        # 本地网关（可选）
 python3 -m contestant.bot_node --seat A --stage 2 --dry-run   # 只看解析
 ```
 

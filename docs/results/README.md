@@ -14,7 +14,7 @@
 
 复跑：
 ```bash
-python -m contestant.eval_lab --groups guarded_hybrid --opponents probe_mirror \
+python3 -m contestant.eval_lab --groups guarded_hybrid --opponents probe_mirror \
   --envs open24,dense24,maze24,practice18 --reps 6 --out docs/experiments/mirror
 ```
 

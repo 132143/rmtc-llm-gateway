@@ -21,7 +21,7 @@
 ```bash
 git rev-parse HEAD          # 应为 d6488e7… 或其后的"仅文档"提交
 git tag -l "seal-*"         # 应看到 seal-v1.2-20261030b
-python run_tests.py         # 必须是 OK + 当前 253 个用例
+python3 run_tests.py         # 必须是 OK + 当前 253 个用例
 cat decision_config.json    # 只能有 decision_type 一个键
 ```
 
@@ -49,5 +49,5 @@ cat decision_config.json    # 只能有 decision_type 一个键
 | 上游不认 `thinking` / `response_format` | 请求体逐级降级：全量 → 去掉被拒字段 → 最小请求，最多 3 次，任意一级成功即停 |
 | 400 但没说哪个字段 | 先丢 `thinking`，再丢 `json_object` |
 | 令牌/地址没设 | 启动即报错退出（不静默 401） |
-| 开赛前不确定能不能用 | `python -m scripts.preflight` 六项自检，全绿再上场 |
+| 开赛前不确定能不能用 | `python3 -m scripts.preflight` 六项自检，全绿再上场 |
 | 策略在某张图上水土不服 | 现场把 `decision_type` 切 `turtle`（保命）或 `economy`（纯经济） |

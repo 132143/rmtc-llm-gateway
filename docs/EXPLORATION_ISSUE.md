@@ -203,7 +203,7 @@ for s, d in res['seats'].items(): print(s, d['score'], d['resource_value'], d['m
 "
 
 # 2) 复现整体的资源分布（96 局/组）
-python -m contestant.eval_lab --groups guarded_hybrid \
+python3 -m contestant.eval_lab --groups guarded_hybrid \
   --envs open24,dense24,maze24,practice18 \
   --opponents probe_weak,probe_mid,probe_farmer,probe_strong \
   --reps 6 --ticks 500 --out docs/experiments/explore_baseline

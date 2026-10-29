@@ -15,7 +15,10 @@
 
 ## 0. 先跑起来（30 秒）
 
-> 开赛前先跑一次 `python -m scripts.preflight`：一条命令自检环境变量 / 网关连通 / 真实 AI 一次成功调用 / decision_type / 封存一致性，并打印可截图的证据行。
+> **解释器名字**：Ubuntu 上只有 `python3`（没有 `python`）；Windows 上用 `python`。本文命令一律写 `python3`。
+
+
+> 开赛前先跑一次 `python3 -m scripts.preflight`：一条命令自检环境变量 / 网关连通 / 真实 AI 一次成功调用 / decision_type / 封存一致性，并打印可截图的证据行。
 
 
 ```bash
@@ -82,7 +85,7 @@ python3 run_tests.py -v      # → Ran 63 tests / OK
 ## 0.5 打包交付（务必用脚本，不要用 Windows 压缩）
 
 ```bash
-python -m scripts.package --out ../dist --name rmtc-competition-<日期>
+python3 -m scripts.package --out ../dist --name rmtc-competition-<日期>
 ```
 
 产物是**带顶层目录、条目用正斜杠**的 zip（Linux `unzip` 能解出正常目录树）。

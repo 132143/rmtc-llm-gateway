@@ -13,7 +13,7 @@
 
 ```bash
 cd rmtc-llm-gateway
-python -m contestant.eval_lab --groups guarded_hybrid --reps 1 --out docs/results/demo
+python3 -m contestant.eval_lab --groups guarded_hybrid --reps 1 --out docs/results/demo
 
 # 用一局真实轨迹生成可视化（离线仿真也会写同样的 trace 格式）
 python - <<'PY'
@@ -30,7 +30,7 @@ for s in ("B", "C", "D"):
 Stage2Simulation(m, brains, ticks=500, session_id="demo", events=default_script(m)).run()
 PY
 
-python -m scripts.trace_view /tmp/trace_A.jsonl --every 25
+python3 -m scripts.trace_view /tmp/trace_A.jsonl --every 25
 ```
 
 你会看到：每 25 片打印一张 24×24 的图（`A` 是车、`o` 是走过的路、`#` 是撞墙格），
@@ -39,7 +39,7 @@ python -m scripts.trace_view /tmp/trace_A.jsonl --every 25
 ### 看法 B：本地网关 + 客户端演示（验证 AI 链路，30 秒）
 
 ```bash
-python -m rmtc_gateway --port 8000 &            # 本地 OpenAI 兼容网关（模拟上游）
+python3 -m rmtc_gateway --port 8000 &            # 本地 OpenAI 兼容网关（模拟上游）
 python examples/llm_demo.py --url http://127.0.0.1:8000/v1/chat/completions --token practice-A
 ```
 
@@ -60,7 +60,7 @@ export RMTC_SEAT=A RMTC_TEAM_TOKEN=practice-A
 export RMTC_AI_URL=http://127.0.0.1:8080/v1/chat/completions
 export RMTC_TRACE=/tmp/trace_A.jsonl          # ← 想复盘就加这一行
 python3 -m contestant.bot_node --seat A --stage 2
-# 跑完后：python -m scripts.trace_view /tmp/trace_A.jsonl --every 50
+# 跑完后：python3 -m scripts.trace_view /tmp/trace_A.jsonl --every 50
 ```
 
 ---
@@ -73,7 +73,7 @@ python3 -m contestant.bot_node --seat A --stage 2
 |---|---|---|
 | 0.1 | 提交技术报告（语雀）与代码仓库/压缩包 | 链接发群里，队长确认 |
 | 0.2 | 把 `decision_type` 登记表交给裁判 | 裁判确认收到 |
-| 0.3 | 本地跑 `python run_tests.py` | 看到 `Ran 249 tests` + `OK` |
+| 0.3 | 本地跑 `python3 run_tests.py` | 看到 `Ran 249 tests` + `OK` |
 | 0.4 | 记录封存版本 | `git rev-parse HEAD` 与 `SEALED_VERSION.txt` 一致 |
 
 ### 阶段 1：到场后（约 T-60 分钟）
@@ -81,8 +81,8 @@ python3 -m contestant.bot_node --seat A --stage 2
 | 步 | 做什么 | 判据（不对就别上场） |
 |---|---|---|
 | 1.1 | 拷代码到参赛机：解压交付包，或 `git clone` 后 `git checkout seal-v1.2-20261029c` | 目录里有 `contestant/`、`run_tests.py` |
-| 1.2 | `python run_tests.py` | `Ran 249 tests` → `OK` |
-| 1.3 | `python -m scripts.preflight --skip-ai` | 只允许 `[WARN]`（healthz/封存），不能有 `[BAD]` |
+| 1.2 | `python3 run_tests.py` | `Ran 249 tests` → `OK` |
+| 1.3 | `python3 -m scripts.preflight --skip-ai` | 只允许 `[WARN]`（healthz/封存），不能有 `[BAD]` |
 
 ### 阶段 2：填写现场信息（约 T-45 分钟）
 
@@ -93,7 +93,7 @@ python3 -m contestant.bot_node --seat A --stage 2
 | 2.3 | `export RMTC_AI_URL=<现场网关>` | 基址 / 带 `v1` / 完整地址三种写法都行，程序会自动补全 |
 | 2.4 | `export ROS_DOMAIN_ID=<现场域号> ROS_LOCALHOST_ONLY=0 RMW_IMPLEMENTATION=rmw_fastrtps_cpp` | 域号必须与裁判一致 |
 | 2.5 | **不要** `export RMTC_MODEL` | 官方要求用统一默认模型，填了会告警 |
-| 2.6 | `python -m scripts.preflight`（带真实调用） | 期望看到 `[OK] 真实调用：成功 …ms，thinking=disabled，max_tokens=512` |
+| 2.6 | `python3 -m scripts.preflight`（带真实调用） | 期望看到 `[OK] 真实调用：成功 …ms，thinking=disabled，max_tokens=512` |
 
 > 这一步的输出就是**“AI 资格”的第一份证据**，截图留存。
 
@@ -131,7 +131,7 @@ python3 -m contestant.bot_node --seat A --stage 2
 |---|---|
 | 6.1 | 截「最终比分页」；把 `/tmp/trace_A.jsonl` 拷到 U 盘/网盘 |
 | 6.2 | 记一行：时间 / 对手 / 分数 / 名次 / AI 成功次数 / 无效动作 |
-| 6.3 | 看 `python -m scripts.trace_view /tmp/trace_A.jsonl --summary` 的摘要，判断这局输在哪（资源？任务？死亡？） |
+| 6.3 | 看 `python3 -m scripts.trace_view /tmp/trace_A.jsonl --summary` 的摘要，判断这局输在哪（资源？任务？死亡？） |
 
 ---
 
@@ -189,7 +189,7 @@ cd ~/rmtc-competition && exec python3 -m contestant.bot_node --seat "$RMTC_SEAT"
 | 启动就报「缺少 RMTC_TEAM_TOKEN」 | 忘了 export | 补上令牌再启动（这是刻意的快速失败） |
 | 启动就报「缺少 RMTC_AI_URL」 | 同上 | 补网关地址 |
 | 裁判页面感知 Tick 不涨 | 域号/QoS 不一致，或没 `source /opt/ros/humble/setup.bash` | 先 source ROS，再核对 `ROS_DOMAIN_ID` |
-| AI 一直失败但程序照跑 | 令牌错 / 网关地址错 | `python -m scripts.preflight` 看具体错误码；`invalid_token` 立刻找裁判 |
+| AI 一直失败但程序照跑 | 令牌错 / 网关地址错 | `python3 -m scripts.preflight` 看具体错误码；`invalid_token` 立刻找裁判 |
 | 分数明显偏低（<30） | 该图走廊密/被针对 | 经裁判同意后把 `decision_type` 改 `turtle`（保命优先）再开下一局 |
 | 想回退到上一版行为 | — | `decision_type` 改 `economy` → 方案A 两条机制立即失效 |
 | 程序崩溃 | — | 重启即可（同一 session 内会重新 join，别改代码） |
@@ -199,5 +199,5 @@ cd ~/rmtc-competition && exec python3 -m contestant.bot_node --seat "$RMTC_SEAT"
 ## 4. 一句话记住的三件事
 
 1. **令牌和网关只从环境变量给**，缺了程序会直接拒绝启动（不会静默 401 丢 15 分）；
-2. **开赛前跑一次 `python -m scripts.preflight`**，全绿再上场，输出就是 AI 资格证据；
+2. **开赛前跑一次 `python3 -m scripts.preflight`**，全绿再上场，输出就是 AI 资格证据；
 3. **现场只允许改两个东西**：环境变量、`decision_config.json` 的 `decision_type`。
