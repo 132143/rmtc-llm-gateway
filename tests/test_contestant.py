@@ -578,7 +578,9 @@ class TestAgent(unittest.TestCase):
     def test_early_reach_only_on_large_maps(self):
         """18×18（练习包）不提前去任务点；20×20 以上（正式赛尺寸）才提前。"""
         mission = [{"id": "reach_target", "type": "reach", "position": [9, 9]}]
-        small = Agent(AgentConfig(seat="A", stage=2, combat_mode="hybrid", reach_after_tick=250))
+        # idle_patrol=False：本用例只验证"要不要提前去任务点"，不验证空闲时走不走
+        small = Agent(AgentConfig(seat="A", stage=2, combat_mode="hybrid", reach_after_tick=250,
+                                  idle_patrol=False))
         small.on_perception(perception(tick=0, pos=(3, 3), hp=100, width=18, height=18,
                                        resources=(((1, 0), 10),), missions=mission))
         small.on_perception(perception(tick=1, pos=(4, 3), hp=100, width=18, height=18,
@@ -588,7 +590,8 @@ class TestAgent(unittest.TestCase):
                                                       width=18, height=18, missions=mission))
         self.assertFalse(small._is_large_map())
 
-        big = Agent(AgentConfig(seat="A", stage=2, combat_mode="hybrid", reach_after_tick=250))
+        big = Agent(AgentConfig(seat="A", stage=2, combat_mode="hybrid", reach_after_tick=250,
+                                idle_patrol=False))
         big.on_perception(perception(tick=0, pos=(3, 3), hp=100, width=24, height=24,
                                      resources=(((1, 0), 10),), missions=mission))
         big.on_perception(perception(tick=1, pos=(4, 3), hp=100, width=24, height=24,
@@ -687,8 +690,9 @@ class TestAgent(unittest.TestCase):
         self.assertGreaterEqual(agent.patrol_moves, 1)
 
     def test_patrol_can_be_disabled(self):
+        # 同时关掉两种"闲着也要走"的机制，才能测到"真的允许 wait"这条底线
         agent = Agent(AgentConfig(seat="A", stage=2, combat_mode="hybrid",
-                                  patrol_when_idle=False))
+                                  patrol_when_idle=False, idle_patrol=False))
         agent.on_perception(perception(tick=0, pos=(6, 6)))
         agent.explored = {(x, y) for x in range(18) for y in range(18)}
         action = agent.on_perception(perception(tick=1, pos=(6, 6)))
