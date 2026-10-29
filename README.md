@@ -15,6 +15,9 @@
 
 ## 0. 先跑起来（30 秒）
 
+> 开赛前先跑一次 `python -m scripts.preflight`：一条命令自检环境变量 / 网关连通 / 真实 AI 一次成功调用 / decision_type / 封存一致性，并打印可截图的证据行。
+
+
 ```bash
 cd rmtc-llm-gateway
 python3 -m rmtc_gateway --port 8000          # 终端 1：起网关（默认本地模拟上游）

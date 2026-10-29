@@ -47,6 +47,8 @@ v1.2 已删除"容器镜像提交"要求；Q&A 第 4 问也只说"会 docker 就
 
 ## 5. 赛前 30 分钟现场核对
 
+0. `python -m scripts.preflight` 全绿（六项：环境变量 / 网关 / 真实 AI / decision_type / 封存 / 令牌不外泄）；
+
 1. `git rev-parse HEAD` 与 `SEALED_VERSION.txt` 一致；
 2. `cat decision_config.json`：只有 `decision_type` 一个键，值在登记表里；
 3. 环境变量齐全：`ROS_DOMAIN_ID` / `ROS_LOCALHOST_ONLY=0` / `RMW_IMPLEMENTATION` / `RMTC_SEAT` / **`RMTC_TEAM_TOKEN`** / **`RMTC_AI_URL`**；
