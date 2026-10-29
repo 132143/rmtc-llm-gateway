@@ -2,9 +2,9 @@
 
 | 项 | 值 |
 |---|---|
-| **封存代码 commit**（tag 指向它） | `3aad6fdccbb7b1a4a9a018e38092075cd7c4b72d` |
-| 短哈希 | `3aad6fd` |
-| 标签 | `seal-v1.2-20261029e`（annotated） |
+| **封存代码 commit**（tag 指向它） | `cb707967e31d4a510788f6f7e10b68103b68ac78` |
+| 短哈希 | `cb707967e31d4a510788f6f7e10b68103b68ac78` |
+| 标签 | `seal-v1.2-20261030a`（annotated） |
 | 规则版本 | 赛事规则 **v1.2** + 通信协议 **v1.1** |
 | 策略默认 | `planner=guarded` + `combat_mode=hybrid` + **方案A**：`center_pull=0.8 / center_pull_ticks=60 / econ_guard=60` |
 | AI 默认 | `thinking={"type":"disabled"}`、`max_tokens=512`、**不填 model**、被拒自动回退一次 |
@@ -20,7 +20,7 @@
 
 ```bash
 git rev-parse HEAD          # 应为 d6488e7… 或其后的"仅文档"提交
-git tag -l "seal-*"         # 应看到 seal-v1.2-20261029e
+git tag -l "seal-*"         # 应看到 seal-v1.2-20261030a
 python run_tests.py         # 必须是 OK + 当前 253 个用例
 cat decision_config.json    # 只能有 decision_type 一个键
 ```
