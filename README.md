@@ -107,7 +107,7 @@ rmtc-llm-gateway/
 │
 ├── rmtc_gateway/              ① 协议 §5 网关服务端（本地练习/审计用）
 │
-├── tests/                     247 个用例，按上面三块分文件
+├── tests/                     249 个用例，按上面三块分文件
 ├── examples/llm_demo.py       不用 ROS 的客户端演示
 │
 ├── docs/
@@ -135,7 +135,7 @@ rmtc-llm-gateway/
 │   ├── gen_maps.py / gen_stage2.py  造练习地图与配置
 │   └── package.py             打交付 zip
 │
-├── run_tests.py               一条命令跑完 247 个用例 + 全量语法检查
+├── run_tests.py               一条命令跑完 249 个用例 + 全量语法检查
 ├── decision_config.json       现场唯一允许改的文件（decision_type）
 ├── SEALED_VERSION.txt         封存记录（commit / tag / 质量门 / 一键回滚）
 ├── PROJECT_MANIFEST.json      机器可读清单（文件数 / 测试数 / 结构）
@@ -341,7 +341,7 @@ python3 -m contestant.bot_node --seat A --stage 2          # 先加 --dry-run �
 
 ### 6.6 第一阶段换 9 张图：贪心全部满分
 
-同一套程序只切 `--strategy`，在官方裁判上跑（`scripts/vm/runsweep.sh`）：
+同一套程序只切 `--strategy`，在官方练习裁判上跑（见 docs/VM_VERIFY_20261029.md 的复现命令）：
 
 | 地图 | 障碍 | greedy | snake（原骨架） |
 |---|---|---|---|

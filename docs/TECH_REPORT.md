@@ -23,7 +23,7 @@
 **现场唯一可切换的东西**是 `decision_config.json` 的 `decision_type`（`collect` / `balanced` / `combat`），
 符合规则 §2.3。
 
-## 二、功能完成情况（实测，v1.1 口径）
+## 二、功能完成情况（实测，v1.2 口径）
 
 | 项目 | 结果 | 怎么测的 |
 |---|---|---|
@@ -62,5 +62,5 @@ python -m rmtc_gateway --port 8000        # 本地网关（可选）
 python3 -m contestant.bot_node --seat A --stage 2 --dry-run   # 只看解析
 ```
 
-关键文档：`docs/CONTESTANT_MAP.md`（协议条款→代码→测试）、`docs/EXPERIMENTS.md`（实验数据）、
+关键文档：`docs/COMPLIANCE.md`（规则条款→代码→测试）、`docs/FUSION_REPORT.md`（实验数据）、
 `docs/COMPLIANCE.md`（合规核对）、`docs/SUBMISSION_CHECKLIST.md`（提交清单）。

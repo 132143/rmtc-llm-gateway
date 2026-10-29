@@ -41,7 +41,7 @@ tick/session 回填、动作窗语义、复活/保护、AI 调用的异步与降
 | 订阅 `/team_X/perception`、发布 `/team_X/action`，`std_msgs/msg/String` | `bot_node.py` | ✅ 话题名按席位拼，不写死 |
 | 感知/动作 QoS：RELIABLE + VOLATILE + KEEP_LAST(1) | `bot_node.qos_profile()` | ✅ |
 | 注册话题 `/team_X/registration` 的 QoS：RELIABLE + **TRANSIENT_LOCAL** + 1 | `bot_node.publish_registration()` | ✅ 每 5 秒重发（保持发布者存活） |
-| 只能访问本席位公开话题；不得读别队感知/裁判内部接口 | `bot_node` 只建这 3 个话题 | ✅（`scripts/vm/*` 是**测试台**，读 `/api/state` 看全图；程序本身不读） |
+| 只能访问本席位公开话题；不得读别队感知/裁判内部接口 | `bot_node` 只建这 3 个话题 | ✅（练习期的对局脚本会读 `/api/state` 看全图，但它们**不在参赛程序里**，也不随交付包发布） |
 | `self.position` 是绝对坐标；`visible_entities[].position` 是 9×9 字符串 | `agent.decode_relative` / `_resources` / `_enemies` | ✅ 两种解析分开，有测试 |
 | 字段类型/缺失不得让进程退出 | `bot_node.on_perception` 双层 try + `Agent` 防御式取值 | ✅ |
 | 同 Tick 重发不重复推进；早于当前 Tick 的帧丢弃 | `if tick <= self.last_tick: return None` | ✅ |
@@ -237,7 +237,7 @@ export RMTC_TEAM_NAME='<队名>'
 | 无事件场次的成绩 | 同上（无陪练） | A 队 **55.0 / 60**（资源 30 + 对抗 + 任务 15） |
 | 决策轨迹 | `RMTC_TRACE` | 100 Tick 一局写出 101 行 jsonl |
 
-复现脚本：`scripts/vm/`（`verify_*` 两个脚本在宿主机工作区，逻辑与这里描述一致）。
+复现命令见 `docs/VM_VERIFY_20261029.md`（练习期脚本属开发工具，不进交付包）。
 
 
 ---
