@@ -79,6 +79,15 @@ python3 run_tests.py -v      # → Ran 63 tests / OK
 （资源记忆证伪、对抗分封顶感知、战争期不再空等），外加争格避让 H2。
 收益表内核（fused）保留为可切换枚举，实测未超过原版路径（见 docs/FUSION_REPORT.md 第五节）。
 
+## 0.5 打包交付（务必用脚本，不要用 Windows 压缩）
+
+```bash
+python -m scripts.package --out ../dist --name rmtc-competition-<日期>
+```
+
+产物是**带顶层目录、条目用正斜杠**的 zip（Linux `unzip` 能解出正常目录树）。
+Windows 的 Compress-Archive 会写成反斜杠条目，Ubuntu 上解压会变成一堆怪文件名——已踩过。
+
 ## 1. 目录结构（清理后：77 个文件，只留"能跑"和"能讲清楚"的东西）
 
 ```text

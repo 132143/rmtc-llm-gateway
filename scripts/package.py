@@ -1,10 +1,9 @@
-#!/usr/bin/env python3
-"""把仓库打包成交付给队友的 zip（只打 git 跟踪的文件，排除开发用的虚拟机脚本）。
+"""把仓库打包成交付给队友/主办方的 zip（只打 git 跟踪的文件）。
 
-用法（仓库根目录）：
-    python scripts/package.py                      # 输出到 ../dist/rmtc-competition-<日期>.zip
-    python scripts/package.py --out 目录 --name 包名
-"""
+⚠️ 必须用本脚本打包，**不要用 Windows 的 Compress-Archive**：
+   它写出的条目分隔符是反斜杠（`contestant\agent.py`），在 Ubuntu 上 `unzip` 会解成一堆
+   带反斜杠的文件名而不是目录，主办方那边直接跑不起来（2026-10-29 实际踩到并修正）。
+   本脚本用 zipfile + `arcname="包名/相对路径"`，条目全部是正斜杠。
 
 from __future__ import annotations
 
